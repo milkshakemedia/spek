@@ -66,7 +66,8 @@ spek_LDFLAGS = \
 	-pthread
 
 spek_cli_SOURCES = \
-	spek-cli.cc
+	spek-cli.cc \
+	spek-font.h
 
 spek_cli_CPPFLAGS = \
 	-include config.h \
@@ -74,6 +75,8 @@ spek_cli_CPPFLAGS = \
 	$(WX_CPPFLAGS)
 
 spek_cli_CXXFLAGS = \
+	$(AVFORMAT_CFLAGS) \
+	$(AVCODEC_CFLAGS) \
 	$(AVUTIL_CFLAGS) \
 	$(WX_CXXFLAGS_ONLY)
 

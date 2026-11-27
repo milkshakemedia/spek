@@ -17,6 +17,8 @@
 #include <sys/types.h>
 
 extern "C" {
+#include <libavformat/avformat.h>
+#include <libavutil/dict.h>
 #include <libavutil/log.h>
 }
 
@@ -26,6 +28,7 @@ extern "C" {
 #include "spek-analysis.h"
 #include "spek-audio.h"
 #include "spek-fft.h"
+#include "spek-font.h"
 #include "spek-palette.h"
 #include "spek-pipeline.h"
 
@@ -57,6 +60,7 @@ const int FFT_BITS = 10;   // 513 frequency rows
 const double LRANGE = -120.0;
 const double URANGE = 0.0;
 const int LPAD = 46, TPAD = 10, RPAD = 60, BPAD = 24;
+const int HEADER = 86;      // metadata and verdict band above the spectrogram
 
 #ifdef _WIN32
 const char SEP = '\\';
@@ -136,6 +140,49 @@ void scan(const std::string& dir, const std::string& rel, std::vector<Item>& out
             out.push_back({ path, r });
         }
     }
+}
+
+// --- Tags -----------------------------------------------------------------
+
+struct Tags
+{
+    std::string artist, title, album, format;  // format: container's short codec name, e.g. "FLAC"
+    int64_t bit_rate = 0;                       // bits per second, whole file
+};
+
+std::string tag(AVDictionary *d, const char *key)
+{
+    AVDictionaryEntry *e = d ? av_dict_get(d, key, nullptr, 0) : nullptr;
+    return e && e->value ? e->value : "";
+}
+
+Tags read_tags(const std::string& path)
+{
+    Tags t;
+    AVFormatContext *fc = nullptr;
+    if (avformat_open_input(&fc, path.c_str(), nullptr, nullptr) != 0) return t;
+    avformat_find_stream_info(fc, nullptr);
+    int s = av_find_best_stream(fc, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+    AVDictionary *sd = s >= 0 ? fc->streams[s]->metadata : nullptr;
+    // FLAC and ID3 keep tags on the file, Ogg on the stream.
+    for (const char *k : { "artist", "album_artist" }) {
+        if (t.artist.empty()) t.artist = tag(fc->metadata, k);
+        if (t.artist.empty()) t.artist = tag(sd, k);
+    }
+    t.title = tag(fc->metadata, "title");
+    if (t.title.empty()) t.title = tag(sd, "title");
+    t.album = tag(fc->metadata, "album");
+    if (t.album.empty()) t.album = tag(sd, "album");
+    if (s >= 0) {
+        t.format = avcodec_get_name(fc->streams[s]->codecpar->codec_id);
+        for (char& c : t.format) {
+            if (c >= 'a' && c <= 'z') c = c - 'a' + 'A';
+        }
+        if (t.format.rfind("PCM_", 0) == 0) t.format = "PCM";
+    }
+    t.bit_rate = fc->bit_rate;
+    avformat_close_input(&fc);
+    return t;
 }
 
 // --- Spectrogram ----------------------------------------------------------
@@ -218,6 +265,100 @@ void text(wxImage& img, int x, int y, const std::string& s, uint32_t rgb)
     }
 }
 
+// Anti-aliased text from the baked DejaVu glyphs in spek-font.h.
+std::vector<unsigned int> utf8(const std::string& s)
+{
+    std::vector<unsigned int> out;
+    for (size_t i = 0; i < s.size();) {
+        unsigned char c = s[i];
+        int n = c < 0x80 ? 0 : (c >> 5) == 6 ? 1 : (c >> 4) == 14 ? 2 : (c >> 3) == 30 ? 3 : -1;
+        if (n < 0 || i + n >= s.size() + (n ? 0 : 1)) {
+            out.push_back('?');
+            ++i;
+            continue;
+        }
+        unsigned int cp = n == 0 ? c : n == 1 ? c & 0x1f : n == 2 ? c & 0x0f : c & 0x07;
+        for (int k = 1; k <= n; ++k) cp = (cp << 6) | (s[i + k] & 0x3f);
+        out.push_back(cp);
+        i += n + 1;
+    }
+    return out;
+}
+
+const SpekGlyph *find_glyph(const SpekFont& f, unsigned int cp)
+{
+    for (int i = 0; i < f.count; ++i) {
+        if (f.glyphs[i].cp == cp) return &f.glyphs[i];
+    }
+    for (int i = 0; i < f.count; ++i) {
+        if (f.glyphs[i].cp == '?') return &f.glyphs[i];
+    }
+    return nullptr;
+}
+
+void blend(wxImage& img, int x, int y, uint32_t rgb, int alpha)
+{
+    if (alpha <= 0 || x < 0 || y < 0 || x >= img.GetWidth() || y >= img.GetHeight()) return;
+    auto mix = [&](int bg, int fg) { return (unsigned char)((bg * (255 - alpha) + fg * alpha) / 255); };
+    img.SetRGB(x, y, mix(img.GetRed(x, y), (rgb >> 16) & 0xff), mix(img.GetGreen(x, y), (rgb >> 8) & 0xff),
+               mix(img.GetBlue(x, y), rgb & 0xff));
+}
+
+int ttext_width(const SpekFont& f, const std::string& s)
+{
+    int w = 0;
+    for (unsigned int cp : utf8(s)) {
+        if (const SpekGlyph *g = find_glyph(f, cp)) w += g->advance;
+    }
+    return w;
+}
+
+// Draws s with its top at y; returns the x after the last glyph.
+int ttext(wxImage& img, const SpekFont& f, int x, int y, const std::string& s, uint32_t rgb)
+{
+    for (unsigned int cp : utf8(s)) {
+        const SpekGlyph *g = find_glyph(f, cp);
+        if (!g) continue;
+        const unsigned char *a = f.alpha + g->offset;
+        for (int r = 0; r < f.height; ++r) {
+            for (int c = 0; c < g->width; ++c) blend(img, x + c, y + r, rgb, a[r * g->width + c]);
+        }
+        x += g->advance;
+    }
+    return x;
+}
+
+// Cut s to fit max_w pixels, ending with an ellipsis.
+std::string fit(const SpekFont& f, const std::string& s, int max_w)
+{
+    if (ttext_width(f, s) <= max_w) return s;
+    std::vector<unsigned int> cps = utf8(s);
+    std::string out;
+    for (unsigned int cp : cps) {
+        std::string next = out;
+        if (cp < 0x80) {
+            next += (char)cp;
+        } else if (cp < 0x800) {
+            next += (char)(0xc0 | (cp >> 6));
+            next += (char)(0x80 | (cp & 0x3f));
+        } else {
+            next += (char)(0xe0 | (cp >> 12));
+            next += (char)(0x80 | ((cp >> 6) & 0x3f));
+            next += (char)(0x80 | (cp & 0x3f));
+        }
+        if (ttext_width(f, next + "\xe2\x80\xa6") > max_w) break;
+        out = next;
+    }
+    return out + "\xe2\x80\xa6";
+}
+
+void fill(wxImage& img, int x0, int y0, int w, int h, uint32_t rgb)
+{
+    for (int y = y0; y < y0 + h; ++y) {
+        for (int x = x0; x < x0 + w; ++x) put(img, x, y, rgb);
+    }
+}
+
 std::string time_label(double s)
 {
     char buf[32];
@@ -236,7 +377,126 @@ std::string freq_label(double hz)
     return buf;
 }
 
-bool spectrogram(const std::string& in, const std::string& out, int width, const FileAnalysis& a)
+std::string thousands(long long v)
+{
+    std::string d = std::to_string(v), out;
+    for (size_t i = 0; i < d.size(); ++i) {
+        if (i && (d.size() - i) % 3 == 0) out += ',';
+        out += d[i];
+    }
+    return out;
+}
+
+std::string khz(double hz)
+{
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%g kHz", std::round(hz / 100.0) / 10.0);
+    return buf;
+}
+
+// The band above the spectrogram: what the file claims to be, a tick or a
+// cross for each claim, and the overall reading.
+void draw_header(wxImage& img, const FileAnalysis& a, const Tags& t, const std::string& name)
+{
+    const int W = img.GetWidth();
+    const uint32_t white = 0xffffff, grey = 0x9a9a9a, green = 0x1f9d55, red = 0xc8372d, amber = 0xc98a00,
+                   slate = 0x5a5a5a;
+    fill(img, 0, 0, W, HEADER, 0x161616);
+    fill(img, 0, HEADER - 1, W, 1, 0x333333);
+
+    // Overall badge, right.
+    const bool hires_claim = a.sample_rate > 48000 || a.bits > 16;
+    uint32_t bcol;
+    std::string mark, head;
+    if (a.verdict == "clean") {
+        bcol = green, mark = "\xe2\x9c\x93", head = hires_claim ? "GENUINE HI-RES" : "LOSSLESS AS CLAIMED";
+    } else if (a.verdict == "unknown") {
+        bcol = amber, mark = "?", head = "CAN'T TELL";
+    } else if (a.verdict == "lossy-format") {
+        bcol = slate, mark = "\xe2\x9c\x97", head = "LOSSY FORMAT";
+    } else {
+        bcol = red, mark = "\xe2\x9c\x97", head = "NOT AS CLAIMED";
+    }
+    std::string sub = a.verdict + " \xc2\xb7 confidence " + std::to_string((int)lround(a.confidence * 100)) + "%";
+    const int bw = std::min(std::max({ ttext_width(spek_font_title, head), ttext_width(spek_font_body, sub), 150 }) + 52,
+                            W / 2),
+              bh = HEADER - 20;
+    const int bx = W - bw - 10, by = 10;
+    fill(img, bx, by, bw, bh, bcol);
+    ttext(img, spek_font_title, bx + 12, by + 8, mark, white);
+    ttext(img, spek_font_title, bx + 38, by + 8, fit(spek_font_title, head, bw - 46), white);
+    ttext(img, spek_font_body, bx + 38, by + 34, fit(spek_font_body, sub, bw - 46), white);
+
+    // Artist - title, album.
+    const int maxw = bx - 24;
+    std::string who = !t.artist.empty() && !t.title.empty() ? t.artist + " \xe2\x80\x93 " + t.title
+                      : !t.title.empty() ? t.title
+                                         : name;
+    who = fit(spek_font_title, who, maxw);
+    int x = ttext(img, spek_font_title, 12, 8, who, white);
+    if (!t.album.empty() && x + 40 < maxw) {
+        ttext(img, spek_font_body, x + 12, 12, fit(spek_font_body, t.album, maxw - x - 12), grey);
+    }
+
+    // What the file claims to be.
+    std::string claim = t.format.empty() ? "" : t.format + "  \xc2\xb7  ";
+    if (a.bits) claim += std::to_string(a.bits) + "-bit / ";
+    claim += khz(a.sample_rate);
+    if (t.bit_rate > 0) claim += "  \xc2\xb7  " + thousands(t.bit_rate / 1000) + " kbps";
+    claim += "  \xc2\xb7  " + std::to_string(a.channels) + " ch  \xc2\xb7  " +
+             std::to_string((int)a.duration / 60) + ":" + (((int)a.duration % 60) < 10 ? "0" : "") +
+             std::to_string((int)a.duration % 60);
+    x = ttext(img, spek_font_body_bold, 12, 34, "CLAIMED", grey);
+    ttext(img, spek_font_body, x + 10, 34, fit(spek_font_body, claim, maxw - x - 10), white);
+
+    // A tick, cross or question mark for each claim.
+    struct Check { int state; std::string text; };  // 1 yes, 0 no, -1 can't tell
+    std::vector<Check> checks;
+    if (!a.lossless) checks.push_back({ 0, "lossy codec" });
+    const CutoffResult& c = a.cutoff;
+    const std::string rate = khz(a.sample_rate);
+    switch (c.verdict) {
+    case CutoffVerdict::FULL_BAND:
+        checks.push_back({ 1, hires_claim ? rate + " band is real" : "full band, no lossy cut" });
+        break;
+    case CutoffVerdict::LOSSY:
+    case CutoffVerdict::LOSSY_UPSAMPLED:
+        checks.push_back({ 0, "lossy cut at " + khz(c.cutoff_hz) });
+        break;
+    case CutoffVerdict::UPSAMPLED:
+        checks.push_back({ 0, c.source_rate ? "upsampled from " + khz(c.source_rate)
+                                            : "band stops at " + khz(c.cutoff_hz) });
+        break;
+    case CutoffVerdict::MIXED:
+        checks.push_back({ 0, "lossy sections, cut at " + khz(c.cutoff_hz) });
+        break;
+    case CutoffVerdict::UNKNOWN:
+        checks.push_back({ -1, "band: can't tell" });
+        break;
+    }
+    if (a.bits) {
+        const BitDepthResult& b = a.bitdepth;
+        if (b.verdict == BitDepthVerdict::NATIVE) {
+            checks.push_back({ 1, std::to_string(a.bits) + " bits are real" });
+        } else if (b.verdict == BitDepthVerdict::UNKNOWN) {
+            checks.push_back({ -1, "bit depth: can't tell" });
+        } else {
+            checks.push_back({ 0, "only " + std::to_string(b.effective_bits) + " bits used" });
+        }
+    }
+    x = 12;
+    for (const Check& ck : checks) {
+        const uint32_t col = ck.state > 0 ? green : ck.state == 0 ? red : amber;
+        const std::string m = ck.state > 0 ? "\xe2\x9c\x93" : ck.state == 0 ? "\xe2\x9c\x97" : "?";
+        fill(img, x, 57, 18, 18, col);
+        ttext(img, spek_font_body_bold, x + 9 - ttext_width(spek_font_body_bold, m) / 2, 57, m, white);
+        x = ttext(img, spek_font_body, x + 25, 57, ck.text, white) + 22;
+        if (x > maxw) break;
+    }
+}
+
+bool spectrogram(const std::string& in, const std::string& out, int width, const FileAnalysis& a,
+                 const Tags& tags, const std::string& name)
 {
     Audio audio;
     FFT fft;
@@ -254,13 +514,14 @@ bool spectrogram(const std::string& in, const std::string& out, int width, const
     spek_pipeline_close(p);
 
     const int h = c.bands;
-    wxImage img(LPAD + width + RPAD, TPAD + h + BPAD);
+    const int top = HEADER + TPAD;
+    wxImage img(std::max(LPAD + width + RPAD, 640), top + h + BPAD);
     img.SetRGB(wxRect(0, 0, img.GetWidth(), img.GetHeight()), 0, 0, 0);
     const double range = URANGE - LRANGE;
     for (int x = 0; x < width; ++x) {
         for (int y = 0; y < h; ++y) {
             double v = std::min(URANGE, std::max(LRANGE, (double)c.values[(size_t)x * h + y]));
-            put(img, LPAD + x, TPAD + h - 1 - y, spek_palette(PALETTE_SOX, (v - LRANGE) / range));
+            put(img, LPAD + x, top + h - 1 - y, spek_palette(PALETTE_SOX, (v - LRANGE) / range));
         }
     }
 
@@ -274,7 +535,7 @@ bool spectrogram(const std::string& in, const std::string& out, int width, const
         if (nyquist / s <= 12) break;
     }
     for (double f = 0; f <= nyquist; f += step) {
-        int y = TPAD + h - 1 - (int)lround(f / nyquist * (h - 1));
+        int y = top + h - 1 - (int)lround(f / nyquist * (h - 1));
         for (int x = LPAD - 5; x < LPAD; ++x) put(img, x, y, axis);
         std::string l = f == 0 ? "0" : freq_label(f);
         text(img, LPAD - 7 - text_width(l), y - 5, l, axis);
@@ -288,16 +549,16 @@ bool spectrogram(const std::string& in, const std::string& out, int width, const
     }
     for (double t = 0; a.duration > 0 && t <= a.duration; t += tstep) {
         int x = LPAD + (int)lround(t / a.duration * (width - 1));
-        for (int y = TPAD + h; y < TPAD + h + 5; ++y) put(img, x, y, axis);
+        for (int y = top + h; y < top + h + 5; ++y) put(img, x, y, axis);
         std::string l = time_label(t);
-        text(img, std::min(x - text_width(l) / 2, img.GetWidth() - text_width(l) - 1), TPAD + h + 8, l, axis);
+        text(img, std::min(x - text_width(l) / 2, img.GetWidth() - text_width(l) - 1), top + h + 8, l, axis);
     }
 
     // The evidence: the cutoff the verdict rests on, dashed, across the
     // lossy segments only when the file is mixed.
     // Thick dashes with a black outline, so they stand out on any part of the
     // palette, and the frequency written in the right margin beside a marker.
-    auto ypos = [&](double hz) { return TPAD + h - 1 - (int)lround(hz / nyquist * (h - 1)); };
+    auto ypos = [&](double hz) { return top + h - 1 - (int)lround(hz / nyquist * (h - 1)); };
     auto hline = [&](double hz, int x0, int x1, uint32_t rgb) {
         if (hz <= 0 || hz >= nyquist) return;
         const int y = ypos(hz);
@@ -336,6 +597,7 @@ bool spectrogram(const std::string& in, const std::string& out, int width, const
         label(cr.cutoff_hz, whole);
     }
 
+    draw_header(img, a, tags, name);
     return img.SaveFile(wxString::FromUTF8(out.c_str()), wxBITMAP_TYPE_PNG);
 }
 
@@ -574,7 +836,7 @@ int main(int argc, char **argv)
                 std::string rel_png = "png/" + r.item.rel + ".png";
                 std::string full = out_dir + "/" + rel_png;
                 make_dirs(full.substr(0, full.find_last_of('/')));
-                if (spectrogram(r.item.path, full, width, r.a)) {
+                if (spectrogram(r.item.path, full, width, r.a, read_tags(r.item.path), r.item.rel)) {
                     r.png = rel_png;
                 } else {
                     fprintf(stderr, "spek-cli: can't write %s\n", full.c_str());
