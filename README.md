@@ -7,6 +7,42 @@ Spek is available on *BSD, GNU/Linux, Windows and Mac OS X.
 
 Find out more about Spek on its website: <https://www.spek.cc/>
 
+## This fork: spotting fake hi-res
+
+This fork (milkshakemedia/spek) adds an analysis engine that looks for audio
+that isn't what it claims to be: lossy transcodes in lossless files, upsampled
+"hi-res", 16-bit masters in 24-bit files, and albums with one transcoded
+track. Verdicts are hints with evidence, never proof.
+
+The batch tool, `spek-cli`, scans files and folders and writes a spectrogram
+PNG per file plus a CSV and JSON report:
+
+    spek-cli -o report ~/Music/Downloads
+
+On the Mac it ships inside the app: `Spek.app/Contents/MacOS/spek-cli`.
+
+Each file gets a `verdict`:
+
+| Verdict | Meaning |
+|---|---|
+| `clean` | full band, and (for 24-bit) all 24 bits in use |
+| `lossy` | the spectrum ends in a lossy encoder's low-pass shelf |
+| `upsampled` | nothing from the music above a lower rate's Nyquist |
+| `lossy+upsampled` | both |
+| `partly-lossy` | a lossy shelf in some sections only (timed in the report) |
+| `fake-bits` | a 16- or 20-bit master in a 24-bit file |
+| `lossy-format` | an MP3, AAC etc. file: lossy, but honestly so |
+| `unknown` | too little audio to judge |
+
+Flags combine (`upsampled+fake-bits`). Each row also carries a confidence
+(0 to 1), the cutoff, the likely source rate and depth, a codec hint and
+plain-language evidence. The spectrogram marks the cutoff the verdict rests
+on with a dashed line (cyan; magenta over just the lossy sections of a
+partly lossy file).
+
+How the detectors work and how they score on the test corpus:
+[tests/corpus/README.md](tests/corpus/README.md).
+
 ## Spek 0.8.5 - Released 2023-01-09
 
 ### New Features And Enhancements

@@ -45,6 +45,16 @@ jobs:
             exit 1
           fi
           echo "$(grep -c Frameworks dyld.log) libraries loaded from the bundle"
+          # The bundled batch tool must run from the bundle too.
+          CLI=Spek.app/Contents/MacOS/spek-cli
+          [ "$(lipo -archs "$CLI")" = arm64 ]
+          DYLD_PRINT_LIBRARIES=1 "$CLI" -q -o "$RUNNER_TEMP/cli" ../../tests/samples 2> cli-dyld.log
+          if grep "$(brew --prefix)" cli-dyld.log; then
+            echo "spek-cli loads libraries from Homebrew" >&2
+            exit 1
+          fi
+          head -3 "$RUNNER_TEMP/cli/report.csv"
+          ls "$RUNNER_TEMP"/cli/png/*.png | wc -l
           hdiutil verify Spek.dmg
       - uses: actions/upload-artifact@v4
         with:
@@ -130,11 +140,15 @@ jobs:
       - run: tests/corpus/verify.py "$RUNNER_TEMP/corpus" --report "$RUNNER_TEMP/corpus/verify.csv"
       - name: Build the analysis driver
         run: ./autogen.sh && make -j"$(nproc)" && make -C tests spek-analyze
-      # Score the detectors. No false positives allowed, and the correct count
-      # may only go up: raise --min-correct when a change improves it.
+      - name: Run the batch tool over the corpus
+        run: src/spek-cli -q -o "$RUNNER_TEMP/spek-report" "$RUNNER_TEMP/corpus"
+      # Score the detectors and check the batch tool's report agrees. No false
+      # positives allowed, and the correct counts may only go up: raise them
+      # when a change improves them.
       - run: >
           tests/corpus/score.py "$RUNNER_TEMP/corpus" --report "$RUNNER_TEMP/corpus/score.csv"
           --max-false 0 --min-correct 63 --min-bitdepth-correct 76
+          --check-report "$RUNNER_TEMP/spek-report/report.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -143,3 +157,8 @@ jobs:
             ${{ runner.temp }}/corpus/manifest.csv
             ${{ runner.temp }}/corpus/verify.csv
             ${{ runner.temp }}/corpus/score.csv
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spek-report-corpus
+          path: ${{ runner.temp }}/spek-report

@@ -48,6 +48,7 @@ po/stamp-po
 src/*.stamp
 src/.libs
 src/spek
+src/spek-cli
 stamp-h1
 tests/.libs
 tests/perf
