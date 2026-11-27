@@ -25,7 +25,7 @@ libopus and libsoxr (Homebrew's and Ubuntu's are). On a Mac:
 | `difficulty` | `easy`, `medium` or `hard`, from what we know about the case |
 | `reference` | the genuine file a fake was made from (used by verify.py) |
 
-## What's in it (70 files)
+## What's in it (76 files)
 
 Three synthetic sources, each synthesised natively at every sample rate so that
 "genuine" really is genuine:
@@ -44,7 +44,7 @@ From each source:
 | `genuine/` | 96/24, 192/24 (not pink), 44.1/16 | must **not** be flagged; a genuine CD file must not read as lossy |
 | `lossy-cd/` | MP3 128/192/320/V0, AAC 128/256, Vorbis q6, Opus 160, each decoded to 44.1/16 FLAC | lossy passed off as lossless |
 | `lossy-hires/` | MP3 320, AAC 256, MP3 128, upsampled to 96/24 | lossy passed off as hi-res |
-| `upsampled/` | 44.1→96 (soxr and FFmpeg's default swresample), 44.1→192, 48→96 | CD or 48 kHz audio in a hi-res container |
+| `upsampled/` | 44.1→96 (soxr and FFmpeg's default swresample), 44.1→192, 48→96; 44.1→96 with noise-shaped dither or steady hiss filling the band above 22 kHz | CD or 48 kHz audio in a hi-res container, including ones dressed up to hide the empty top |
 | `bitdepth/` | 16-bit at 96 kHz stored as 24-bit: zero-padded, with low-level 24-bit noise, and after a −0.5 dB gain change | fake 24-bit; the last two defeat an empty-low-bits test |
 | `splice/` | genuine 96/24 with 8–12 s replaced by MP3 320 | frame-by-frame detection; a whole-track average dilutes it |
 
@@ -67,7 +67,9 @@ what it says, so use files whose provenance you trust.
 It is not the detector: it may use what a detector can't know, chiefly the
 genuine source each fake came from. Lossy files must differ from their source by
 far more than a lossless copy could (SNR under 70 dB); upsampled files must fall
-at least 25 dB above the true source's Nyquist; genuine hi-res must have real
+at least 25 dB above the true source's Nyquist, or, where noise was added up top
+to hide that, differ from a plain upsample of the same source only by noise at
+the labelled level; genuine hi-res must have real
 content above 26 kHz and more than 65536 distinct sample values; fake 24-bit
 files must sit on a 16-bit grid; the splice must lose its top end only in the
 labelled seconds.
@@ -99,14 +101,14 @@ files are correct than the last accepted count.
 
 ### Frequency cutoff (Phase 2b)
 
-57 of 70 correct, 4 partial, 9 missed, 0 false positives:
+63 of 76 correct, 4 partial, 9 missed, 0 false positives:
 
 | Label | Result |
 |---|---|
 | genuine (12) | all full-band |
 | padded bits (9) | all full-band (that's the bit-depth detector's job) |
 | lossy (24) | 14 correct, 1 partial, 9 missed |
-| upsampled (12) | all correct, source rate right |
+| upsampled (18) | all correct, source rate right, including the 6 noise-filled ones |
 | lossy+upsampled (10) | 7 correct, 3 reported as upsampled |
 | mixed (3) | all correct, segments within 0.2 s |
 
@@ -129,7 +131,7 @@ What it can't do yet:
 
 ### True bit depth (Phase 2c)
 
-70 of 70 correct, 0 false positives. All 9 fake 24-bit files are flagged with
+76 of 76 correct, 0 false positives. All 9 fake 24-bit files are flagged with
 the right source depth (16 bits):
 
 | Fake | How it's caught |
@@ -154,3 +156,37 @@ Worth knowing:
   file, but not a sign of a fake.
 - **A 16-bit master upsampled to 96/24** is reported as native. Resampling
   fills the low bits for real, so that's the cutoff detector's job.
+
+### Noise filling the top (Phase 2d)
+
+An upsample can hide its empty top with noise: noise-shaped dither from a
+mastering export, or a steady hiss added on purpose. The 6 noise-filled corpus
+files (dither at -110 dBFS, hiss 23-46 kHz at -85 dBFS, on each material) are
+all caught, with no new false positives. Before this change the cutoff rule
+missed all 3 hiss files. Two checks do it:
+
+- **A wall under the noise.** When a hi-res frame's spectrum runs nearly to
+  Nyquist, the detector also looks underneath it for a drop of 30 dB or more
+  sitting at a standard source Nyquist (22.05 or 24 kHz), with only a far
+  quieter plateau above. Real recordings don't end in a 30 dB wall at exactly
+  those frequencies. This catches the music and pink hiss files.
+- **Does the top follow the music?** On the sparse material the hiss is louder
+  than the music near 20 kHz, so there's no wall at all. Frame by frame, each
+  1 kHz band's level is correlated with the 4-12 kHz level. In an upsample the
+  bands just under the source's Nyquist follow the music (0.43 here) and those
+  above don't follow it at all (-0.01). Genuine files with real ultrasonic
+  content keep 0.16 or more above it; the threshold is 0.06. Reported as
+  `basis: tracking` with confidence 0.5, because it rests on one corpus file so
+  far.
+
+Worth knowing:
+
+- **The music-following test needs music with dynamics.** Steady signals like
+  pink noise follow nothing, so they're left alone, not judged.
+- **A genuine recording with nothing above 20 kHz but converter noise** could
+  in principle trip the music-following test if its music happens to fade out
+  right at 22 kHz. Real masters are the test of that; the corpus has no such
+  file yet.
+- **An exciter that synthesises harmonics above 22 kHz from the music** fills
+  the top with content that does follow the music. Neither check catches that,
+  and it isn't in the corpus.

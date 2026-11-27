@@ -21,6 +21,24 @@ const double SHELF_DROP_DB = 20.0;
 // still means a brick wall: the drop is measured across about 1 kHz, far
 // steeper than any natural roll-off. Corpus: false positives start at 6 dB.
 const double AVG_DROP_DB = 12.0;
+// Under a noise plateau that runs to the top, a wall must drop this far, and
+// sit at a standard source Nyquist (44.1 or 48 kHz rates: below WALL_MAX_HZ).
+// Real recordings don't end in a 30 dB wall at exactly 22.05 or 24 kHz.
+const double WALL_DROP_DB = 30.0;
+const double WALL_MAX_HZ = 24500.0;
+// Music-following test, for hi-res files whose top is filled with noise louder
+// than the music near 20 kHz (no wall to find). Over the active frames, each
+// 1 kHz band's level is correlated with the 4-12 kHz level. In an upsample the
+// bands just under the source's Nyquist follow the music and those above
+// don't follow it at all. Corpus: files with real ultrasonic content keep 0.16
+// or more above the Nyquist, the hiss-filled upsample sits at -0.01; the
+// threshold is halfway. Files with no dynamics (pink noise) never reach the
+// 0.35 needed below the Nyquist, so they are left alone.
+const double TRACK_FROM_HZ = 16000.0;
+const double TRACK_TO_HZ = 34000.0;
+const double TRACK_BELOW_MIN = 0.35;  // mean correlation 1-5 kHz under the Nyquist
+const double TRACK_ABOVE_MAX = 0.06;  // mean correlation 1-9 kHz over it
+const int TRACK_MIN_FRAMES = 50;
 // Edges are only looked for above this frequency.
 const double MIN_EDGE_HZ = 4000.0;
 // A frame is judged only if its median level from 1 to 15 kHz, normalised to
@@ -126,7 +144,7 @@ std::vector<double> band_levels(const std::vector<double>& bin_db, int bins_per_
 
 // Find the highest shelf edge in a band spectrum. Returns false if there is none.
 bool find_shelf(const std::vector<double>& bands, double band_hz, double& edge_hz, double& drop_db,
-                double min_drop = SHELF_DROP_DB)
+                double min_drop = SHELF_DROP_DB, double max_edge_hz = 1e12)
 {
     const int nbands = (int)bands.size();
     // top[k]: loudest band from k up to the top of the analysed range.
@@ -135,7 +153,11 @@ bool find_shelf(const std::vector<double>& bands, double band_hz, double& edge_h
         top[k] = std::max(top[k + 1], bands[k]);
     }
     // The highest edge with a big enough drop is where the content ends.
-    for (int k = nbands - GAP_BANDS - 1; k >= BELOW_BANDS; --k) {
+    int start = nbands - GAP_BANDS - 1;
+    if (max_edge_hz / band_hz < start) {
+        start = (int)(max_edge_hz / band_hz);
+    }
+    for (int k = start; k >= BELOW_BANDS; --k) {
         if (k * band_hz < MIN_EDGE_HZ) {
             break;
         }
@@ -247,7 +269,38 @@ void CutoffAnalyser::analyse_frame()
     frame.active = !mid.empty() && median(mid) > ACTIVE_LEVEL_DB;
 
     if (frame.active) {
-        find_shelf(bands, band_hz, frame.cutoff_hz, frame.drop_db);
+        bool found = find_shelf(bands, band_hz, frame.cutoff_hz, frame.drop_db);
+        // Noise filling the top. If the spectrum runs (nearly) to Nyquist, look
+        // under it: a wall at a standard source rate's Nyquist, with only a far
+        // quieter plateau above, is an upsample with noise or dither added.
+        if (this->sample_rate > 48000 && (!found || frame.cutoff_hz >= 0.9 * nyquist)) {
+            double edge = 0, drop = 0;
+            if (find_shelf(bands, band_hz, edge, drop, WALL_DROP_DB, WALL_MAX_HZ)) {
+                int source = likely_source_rate(edge);
+                if (source && source < this->sample_rate) {
+                    frame.cutoff_hz = edge;
+                    frame.drop_db = drop;
+                }
+            }
+        }
+        // Levels for the music-following test.
+        if (this->sample_rate > 48000 && 0.9 * nyquist >= TRACK_TO_HZ) {
+            auto level = [&](double lo, double hi) {
+                double sum = 0;
+                int n = 0;
+                for (int b = (int)(lo / bin_hz); b < (int)(hi / bin_hz); ++b) {
+                    sum += pow(10.0, bin_db[b] / 10.0);
+                    ++n;
+                }
+                return 10.0 * log10(sum / std::max(1, n) + 1e-30);
+            };
+            std::vector<double> row;
+            row.push_back(level(4000.0, 12000.0));
+            for (double f = TRACK_FROM_HZ; f < TRACK_TO_HZ; f += 1000.0) {
+                row.push_back(level(f, f + 1000.0));
+            }
+            this->track.push_back(row);
+        }
         // Power average over active frames, for the whole-file check.
         if (this->power_sum.empty()) {
             this->power_sum.assign(bin_db.size(), 0.0);
@@ -399,6 +452,52 @@ CutoffResult CutoffAnalyser::finish()
                     r.verdict = CutoffVerdict::UPSAMPLED;
                     r.source_rate = likely_source_rate(edge);
                 }
+            }
+        }
+    }
+
+    // Music-following test: only when nothing else found a band limit.
+    if (r.verdict == CutoffVerdict::FULL_BAND && (int)this->track.size() >= TRACK_MIN_FRAMES) {
+        const size_t nt = this->track.size();
+        auto corr = [&](size_t col) {
+            double ma = 0, mb = 0;
+            for (const auto& row : this->track) {
+                ma += row[0];
+                mb += row[col];
+            }
+            ma /= nt;
+            mb /= nt;
+            double sab = 0, saa = 0, sbb = 0;
+            for (const auto& row : this->track) {
+                double a = row[0] - ma, b = row[col] - mb;
+                sab += a * b;
+                saa += a * a;
+                sbb += b * b;
+            }
+            return saa > 0 && sbb > 0 ? sab / sqrt(saa * sbb) : 0.0;
+        };
+        // Mean correlation of the 1 kHz bands in [lo, hi).
+        auto mean_corr = [&](double lo, double hi) {
+            double sum = 0;
+            int n = 0;
+            for (double f = lo; f < hi; f += 1000.0) {
+                sum += corr(1 + (size_t)lround((f - TRACK_FROM_HZ) / 1000.0));
+                ++n;
+            }
+            return sum / n;
+        };
+        double best_margin = 0;
+        for (int source : { 44100, 48000 }) {
+            double nyq = std::floor(source / 2000.0) * 1000.0;  // 22 or 24 kHz
+            double below = mean_corr(nyq - 5000.0, nyq - 1000.0);
+            double above = mean_corr(nyq + 1000.0, nyq + 9000.0);
+            if (below >= TRACK_BELOW_MIN && above <= TRACK_ABOVE_MAX && below - above > best_margin) {
+                best_margin = below - above;
+                r.verdict = CutoffVerdict::UPSAMPLED;
+                r.basis = "tracking";
+                r.source_rate = source;
+                r.cutoff_hz = source / 2.0;
+                r.confidence = 0.5;
             }
         }
     }

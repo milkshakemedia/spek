@@ -92,6 +92,23 @@ static void test_upsampled()
     test("96 kHz with a 16 kHz shelf is lossy+upsampled", std::string("lossy+upsampled"), verdict(r));
 }
 
+static void test_upsampled_with_hiss()
+{
+    // 44.1 kHz material upsampled to 96 kHz, then steady hiss 60 dB down
+    // filling 23-46 kHz: the spectrum runs to the top, the wall is underneath.
+    const int rate = 96000;
+    std::vector<float> music = lowpass(noise(rate * 3, 0.3f), rate, 21500);
+    std::vector<float> wide = noise(rate * 3, 0.0003f, 99991u);
+    std::vector<float> hi = lowpass(wide, rate, 46000);
+    std::vector<float> lo = lowpass(wide, rate, 23000);
+    for (size_t i = 0; i < music.size(); ++i) {
+        music[i] += hi[i] - lo[i];
+    }
+    CutoffResult r = analyse(music, rate);
+    test("upsampled with hiss on top is upsampled", std::string("upsampled"), verdict(r));
+    test("hiss: source rate 44.1 kHz", 44100, r.source_rate);
+}
+
 static void test_mixed()
 {
     const int rate = 96000;
@@ -213,6 +230,7 @@ void test_analysis()
     run("cutoff full band", test_full_band);
     run("cutoff lossy shelf", test_lossy_shelf);
     run("cutoff upsampled", test_upsampled);
+    run("cutoff upsampled with hiss", test_upsampled_with_hiss);
     run("cutoff mixed", test_mixed);
     run("cutoff silence", test_silence);
     run("bit depth native", test_bitdepth_native);

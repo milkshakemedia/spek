@@ -65,8 +65,9 @@ struct CutoffResult
     std::vector<CutoffSegment> lossy_segments;  // runs of lossy shelf of 2 s or more
     CutoffVerdict verdict = CutoffVerdict::UNKNOWN;
     double confidence = 0;    // 0..1: share of active frames that agree with the verdict
-    std::string basis = "frames";  // "frames", or "average" if only the whole-file
-                                   // power average showed the shelf (weaker evidence)
+    std::string basis = "frames";  // "frames"; "average" if only the whole-file power
+                                   // average showed the shelf; "tracking" if only the
+                                   // music-following test did (both weaker evidence)
     std::vector<CutoffFrame> frame_log;
 };
 
@@ -97,6 +98,9 @@ private:
     long long consumed;
     std::vector<double> power_sum;  // summed linear power per bin over active frames
     int power_frames;
+    // Per active frame: the 4-12 kHz level, then 1 kHz bands from 16 kHz up,
+    // for the check that ultrasonic content follows the music.
+    std::vector<std::vector<double>> track;
 };
 
 // Decode the first channel of an open audio file and analyse it.

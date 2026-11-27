@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zlib
 
 import numpy as np
 
@@ -354,6 +355,34 @@ def derive_fakes(c, src_name, master_hi, hi_rate, cd_master, material, tmp, d):
               difficulty="medium" if rs == "swr" else "easy",
               notes="swresample defaults leave a softer, less obvious band edge" if rs == "swr" else "",
               **d)
+
+    # Upsampled, then the empty band above 22.05 kHz filled with noise, so
+    # there's no clean shelf for a cutoff rule to find. Mastering exports add
+    # noise-shaped dither (energy rising towards Nyquist), and some "hi-res"
+    # releases carry a steady hiss up top. Neither follows the music.
+    up = read_float(cd_master, 96000)
+    rng = np.random.default_rng(zlib.crc32(src_name.encode()))
+    n = up.shape[0]
+    for name, level_db, case, diff in (
+            ("44k-to-96k-shaped-dither", -110.0,
+             "CD 44.1/16 upsampled to 96/24 with noise-shaped dither filling the top", "medium"),
+            ("44k-to-96k-hiss", -85.0,
+             "CD 44.1/16 upsampled to 96/24 with steady ultrasonic hiss above 22 kHz", "hard")):
+        if "shaped" in name:
+            # Second-order high-passed noise: rises 12 dB/octave to Nyquist.
+            fill = np.stack([np.diff(highpassed_noise(n + 1, rng)) for _ in range(2)], axis=1)
+        else:
+            # White noise band-passed to 23-46 kHz.
+            spec = np.fft.rfft(rng.standard_normal((n, 2)), axis=0)
+            f = np.fft.rfftfreq(n, 1.0 / 96000)
+            spec[(f < 23000) | (f > 46000)] = 0
+            fill = np.fft.irfft(spec, n, axis=0)
+        fill *= 10 ** (level_db / 20) / np.sqrt(np.mean(fill ** 2))
+        out = os.path.join(base, "upsampled", name + ".flac")
+        write_flac(out, quantise(up + fill, 24, rng), 96000, 24)
+        c.add(out, reference=cd_ref, source=src_name, case=case,
+              true_rate=44100, true_bits=16, expected_verdict="upsampled", difficulty=diff,
+              notes="noise at %.0f dBFS RMS above the source's Nyquist" % level_db, **d)
 
     if not master_hi:
         return
