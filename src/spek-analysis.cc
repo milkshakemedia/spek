@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
 
 #include "spek-audio.h"
 #include "spek-fft.h"
@@ -609,8 +611,10 @@ BitDepthResult BitDepthAnalyser::finish()
         ++r.zero_low_bits;
     }
     if (r.zero_low_bits >= PAD_MIN_BITS) {
+        // Four or more bits never set over a whole file of audio is no accident.
         r.verdict = BitDepthVerdict::PADDED;
         r.effective_bits = this->container_bits - r.zero_low_bits;
+        r.confidence = 0.99;
         return r;
     }
     r.verdict = BitDepthVerdict::NATIVE;
@@ -706,6 +710,9 @@ BitDepthResult BitDepthAnalyser::finish()
     r.comb_period = (double)n / fundamental;
     r.verdict = BitDepthVerdict::REQUANTISED;
     r.effective_bits = (int)lround(this->container_bits - log2(r.comb_period));
+    // 0.5 at the threshold, rising to 0.95 by 10 dB over it (the corpus fakes
+    // range from 3 to 29 dB over).
+    r.confidence = std::min(0.95, 0.5 + 0.045 * (r.comb_db - COMB_MIN_DB));
     return r;
 }
 
@@ -731,4 +738,177 @@ BitDepthResult analyse_bitdepth(AudioFile& file)
         analyser.feed(ints.data(), n);
     }
     return analyser.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Everything about one file.
+
+namespace {
+
+std::string format(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+std::string format(const char *fmt, ...)
+{
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    return buf;
+}
+
+std::string khz(double hz)
+{
+    return format("%.1f kHz", hz / 1000.0);
+}
+
+void summarise(FileAnalysis& a)
+{
+    const CutoffResult& c = a.cutoff;
+    const BitDepthResult& b = a.bitdepth;
+    std::vector<std::string> flags;
+    double confidence = 0;
+
+    auto pct = [](double x) { return (int)lround(100.0 * x); };
+    auto weak = [&]() {
+        if (c.basis == "average") {
+            a.evidence.push_back("seen only in the whole-file average, not frame by frame (weaker)");
+        } else if (c.basis == "tracking") {
+            a.evidence.push_back(format(
+                "content above %s doesn't follow the music, below it does (weaker)", khz(c.cutoff_hz).c_str()));
+        }
+    };
+
+    switch (c.verdict) {
+    case CutoffVerdict::LOSSY:
+    case CutoffVerdict::LOSSY_UPSAMPLED:
+        flags.push_back("lossy");
+        if (c.verdict == CutoffVerdict::LOSSY_UPSAMPLED) {
+            flags.push_back("upsampled");
+        }
+        a.evidence.push_back(format("spectrum ends at %s in %d%% of frames (%s)", khz(c.cutoff_hz).c_str(),
+                                    pct(c.consistency), c.codec_hint.c_str()));
+        weak();
+        confidence = std::max(confidence, c.confidence);
+        break;
+    case CutoffVerdict::UPSAMPLED:
+        flags.push_back("upsampled");
+        if (c.source_rate) {
+            a.evidence.push_back(format("nothing from the music above %s: likely a %g kHz source",
+                                        khz(c.cutoff_hz).c_str(), c.source_rate / 1000.0));
+        } else {
+            a.evidence.push_back(format("band-limited at %s", khz(c.cutoff_hz).c_str()));
+        }
+        weak();
+        confidence = std::max(confidence, c.confidence);
+        break;
+    case CutoffVerdict::MIXED:
+        flags.push_back("partly-lossy");
+        for (const CutoffSegment& s : c.lossy_segments) {
+            a.evidence.push_back(format("lossy shelf at %s from %.1f to %.1f s", khz(s.cutoff_hz).c_str(),
+                                        s.start, s.end));
+        }
+        confidence = std::max(confidence, c.confidence);
+        break;
+    case CutoffVerdict::FULL_BAND:
+    case CutoffVerdict::UNKNOWN:
+        break;
+    }
+
+    if (b.verdict == BitDepthVerdict::PADDED || b.verdict == BitDepthVerdict::REQUANTISED) {
+        flags.push_back("fake-bits");
+        if (b.verdict == BitDepthVerdict::PADDED) {
+            a.evidence.push_back(format("%d-bit source: the low %d bits are zero in every sample",
+                                        b.effective_bits, b.zero_low_bits));
+        } else {
+            a.evidence.push_back(format(
+                "%d-bit source: sample values sit on a %.1f-code lattice (comb %.0f dB), the trace of a gain "
+                "change or dither on a %d-bit master", b.effective_bits, b.comb_period, b.comb_db,
+                b.effective_bits));
+        }
+        confidence = std::max(confidence, b.confidence);
+    }
+
+    if (!a.lossless && !a.codec.empty()) {
+        // A lossy file is what it says it is. Report what the detectors saw,
+        // but don't call it a fake.
+        a.verdict = "lossy-format";
+        a.confidence = 1.0;
+        a.evidence.insert(a.evidence.begin(), "lossy codec: " + a.codec);
+        return;
+    }
+    if (!flags.empty()) {
+        a.verdict.clear();
+        for (const std::string& f : flags) {
+            a.verdict += (a.verdict.empty() ? "" : "+") + f;
+        }
+        a.confidence = confidence;
+        return;
+    }
+    if (c.verdict != CutoffVerdict::FULL_BAND) {
+        // Clean needs the cutoff check to have passed; a 16-bit file's bit
+        // depth on its own says nothing.
+        a.verdict = "unknown";
+        a.confidence = 0;
+        a.evidence.push_back("too little active audio to judge the spectrum");
+        return;
+    }
+    a.verdict = "clean";
+    a.confidence = c.confidence;
+    a.evidence.push_back(format("full band in %d%% of frames", pct(c.consistency)));
+    if (b.verdict == BitDepthVerdict::NATIVE && b.container_bits == 24) {
+        a.evidence.push_back("uses all 24 bits");
+    }
+}
+
+} // namespace
+
+bool codec_is_lossless(const std::string& codec_name)
+{
+    // FFmpeg's long names for the lossless audio codecs worth knowing.
+    static const char *lossless[] = {
+        "FLAC", "PCM", "ALAC", "Apple Lossless", "WavPack", "Monkey", "TTA", "True Audio",
+        "MLP", "TrueHD", "lossless", "Lossless", "DSD", "Shorten", "OptimFROG", "TAK",
+    };
+    for (const char *name : lossless) {
+        if (codec_name.find(name) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+FileAnalysis analyse_file(AudioFile& file)
+{
+    FileAnalysis a;
+    a.codec = file.get_codec_name();
+    a.lossless = codec_is_lossless(a.codec);
+    a.sample_rate = file.get_sample_rate();
+    a.bits = file.get_bits_per_sample();
+    a.channels = file.get_channels();
+    a.duration = file.get_duration();
+
+    CutoffAnalyser cutoff(a.sample_rate > 0 ? a.sample_rate : 44100);
+    BitDepthAnalyser bitdepth(a.lossless ? a.bits : 0);
+    if (!file.get_error()) {
+        const bool ints = a.lossless && (a.bits == 16 || a.bits == 24);
+        const float scale = a.bits == 16 ? 32767.0f : 8388608.0f;
+        std::vector<int32_t> buf;
+        file.start(0, 1);
+        int n;
+        while ((n = file.read()) > 0) {
+            const float *samples = file.get_buffer();
+            cutoff.feed(samples, n);
+            if (ints) {
+                buf.resize(n);
+                for (int i = 0; i < n; ++i) {
+                    buf[i] = (int32_t)lrintf(samples[i] * scale);
+                }
+                bitdepth.feed(buf.data(), n);
+            }
+        }
+    }
+    a.cutoff = cutoff.finish();
+    a.bitdepth = bitdepth.finish();
+    summarise(a);
+    return a;
 }

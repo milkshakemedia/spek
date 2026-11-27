@@ -68,6 +68,51 @@ def score_bitdepth(row, b):
     return "correct" if b.get("effective_bits") == row["true_bits"] else "partial"
 
 
+# The batch tool's overall verdict for each label.
+OVERALL_EXPECTED = {
+    "genuine": "clean",
+    "padded-bits": "fake-bits",
+    "lossy": "lossy",
+    "upsampled": "upsampled",
+    "lossy+upsampled": "lossy+upsampled",
+    "mixed": "partly-lossy",
+}
+
+
+def check_report(path, rows, results):
+    """Compare spek-cli's report with the driver's results, file by file."""
+    with open(path) as f:
+        report = {r["file"]: r for r in json.load(f)["files"]}
+    problems, overall = [], collections.Counter()
+    for row, res in zip(rows, results):
+        r = report.get(row["path"])
+        if r is None:
+            problems.append("%s: missing from the report" % row["path"])
+            continue
+        for key in ("cutoff", "bitdepth"):
+            if r.get(key, {}).get("verdict") != res.get(key, {}).get("verdict"):
+                problems.append("%s: report says %s %s, driver %s" % (
+                    row["path"], key, r.get(key, {}).get("verdict"), res.get(key, {}).get("verdict")))
+        want = OVERALL_EXPECTED[row["expected_verdict"]]
+        got = r.get("verdict")
+        if got == want:
+            overall["correct"] += 1
+        elif got == "clean":
+            overall["false" if want == "clean" else "missed"] += 1
+        elif want == "clean":
+            overall["false"] += 1
+        else:
+            overall["partial"] += 1
+    print("Overall (spek-cli report): %d correct, %d partial, %d missed, %d false positives, of %d files" % (
+        overall["correct"], overall["partial"], overall["missed"], overall["false"], len(rows)))
+    for p in problems[:20]:
+        print("  " + p)
+    out = ["report disagrees with the driver on %d files" % len(problems)] if problems else []
+    if overall["false"]:
+        out.append("report has %d false positives" % overall["false"])
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("corpus")
@@ -76,6 +121,9 @@ def main():
     ap.add_argument("--max-false", type=int, help="fail if any detector has more false positives than this")
     ap.add_argument("--min-correct", type=int, help="fail if the cutoff detector gets fewer files right")
     ap.add_argument("--min-bitdepth-correct", type=int, help="fail if the bit-depth detector gets fewer files right")
+    ap.add_argument("--check-report", metavar="JSON",
+                    help="spek-cli's report.json for the same corpus: fail unless it agrees with the driver, "
+                         "and score its overall verdicts")
     args = ap.parse_args()
 
     with open(os.path.join(args.corpus, "manifest.json")) as f:
@@ -146,6 +194,8 @@ def main():
             w.writerows(table)
 
     failed = []
+    if args.check_report:
+        failed += check_report(args.check_report, rows, results)
     for name, c in counts.items():
         if args.max_false is not None and c["false"] > args.max_false:
             failed.append("%s: %d false positives (allowed %d)" % (name, c["false"], args.max_false))

@@ -135,6 +135,7 @@ struct BitDepthResult
     double comb_db = 0;       // how far the comb peak stands above its neighbours
     long long samples = 0;    // samples analysed
     BitDepthVerdict verdict = BitDepthVerdict::UNKNOWN;
+    double confidence = 0;    // 0..1, for PADDED/REQUANTISED only
 };
 
 class BitDepthAnalyser
@@ -157,3 +158,30 @@ private:
 
 // Decode the first channel of an open audio file and analyse its bit depth.
 BitDepthResult analyse_bitdepth(AudioFile& file);
+
+// ---------------------------------------------------------------------------
+// Everything about one file, from a single decode.
+
+struct FileAnalysis
+{
+    std::string codec;        // decoder's long name, e.g. "FLAC (Free Lossless Audio Codec)"
+    bool lossless = false;    // a lossless or PCM codec
+    int sample_rate = 0;
+    int bits = 0;             // bits per sample, 0 for lossy codecs
+    int channels = 0;
+    double duration = 0;      // seconds
+    CutoffResult cutoff;
+    BitDepthResult bitdepth;
+
+    // Overall reading. verdict is "clean", "unknown", "lossy-format" (a lossy
+    // file, which is no fake), or a "+"-joined list of what's wrong: "lossy",
+    // "upsampled", "partly-lossy", "fake-bits". Evidence for a person.
+    std::string verdict;
+    double confidence = 0;
+    std::vector<std::string> evidence;
+};
+
+bool codec_is_lossless(const std::string& codec_name);
+
+// Decode the first channel once and run every detector on it.
+FileAnalysis analyse_file(AudioFile& file);

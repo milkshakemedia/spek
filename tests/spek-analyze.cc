@@ -45,7 +45,8 @@ int main(int argc, char **argv)
             status = 1;
             continue;
         }
-        CutoffResult r = analyse_cutoff(*file);
+        FileAnalysis a = analyse_file(*file);
+        const CutoffResult& r = a.cutoff;
         printf("{\"file\": %s, \"sample_rate\": %d, \"bits\": %d, \"cutoff\": {"
                "\"verdict\": \"%s\", \"confidence\": %.3f, \"cutoff_hz\": %.0f, "
                "\"consistency\": %.3f, \"drop_db\": %.1f, \"source_rate\": %d, "
@@ -71,13 +72,12 @@ int main(int argc, char **argv)
             printf("]");
         }
         printf("}");
-        auto file2 = audio.open(argv[i], 0);
-        BitDepthResult b = analyse_bitdepth(*file2);
+        const BitDepthResult& b = a.bitdepth;
         printf(", \"bitdepth\": {\"verdict\": \"%s\", \"container_bits\": %d, \"effective_bits\": %d, "
                "\"zero_low_bits\": %d, \"comb_period\": %.1f, \"comb_db\": %.1f, \"samples\": %lld}",
                bitdepth_verdict_name(b.verdict), b.container_bits, b.effective_bits, b.zero_low_bits,
                b.comb_period, b.comb_db, b.samples);
-        printf("}\n");
+        printf(", \"verdict\": %s, \"confidence\": %.3f}\n", json_string(a.verdict).c_str(), a.confidence);
     }
     return status;
 }

@@ -48,13 +48,13 @@ if [ "$BUILD" = 1 ]; then
         exit 1
     fi
     export ACLOCAL_PATH="$(dirname "$WXM4"):$(dirname "$GTM4"):$BREW_PREFIX/share/aclocal${ACLOCAL_PATH:+:$ACLOCAL_PATH}"
-    rm -f src/spek
+    rm -f src/spek src/spek-cli
     ./autogen.sh
     make -j"$(sysctl -n hw.ncpu)"
 fi
 
-if [ ! -x src/spek ] || [ ! -f dist/osx/Info.plist ]; then
-    echo "src/spek or dist/osx/Info.plist is missing; build Spek first." >&2
+if [ ! -x src/spek ] || [ ! -x src/spek-cli ] || [ ! -f dist/osx/Info.plist ]; then
+    echo "src/spek, src/spek-cli or dist/osx/Info.plist is missing; build Spek first." >&2
     exit 1
 fi
 
@@ -64,10 +64,12 @@ cd dist/osx
 APP=Spek.app
 FW=$APP/Contents/Frameworks
 EXE=$APP/Contents/MacOS/Spek
+CLI=$APP/Contents/MacOS/spek-cli
 
 rm -fr "$APP"
 mkdir -p "$APP/Contents/MacOS" "$FW" "$APP/Contents/Resources"
 cp "$TOP/src/spek" "$EXE"
+cp "$TOP/src/spek-cli" "$CLI"
 cp Info.plist "$APP/Contents/"
 cp Spek.icns "$APP/Contents/Resources/"
 cp *.png "$APP/Contents/Resources/"
@@ -138,7 +140,7 @@ resolve() {
 # Breadth-first walk: each work item is "<file in bundle>|<original path>".
 # Every non-system dependency is copied into Contents/Frameworks once and every
 # reference to it is rewritten to @executable_path/../Frameworks/<name>.
-QUEUE="$EXE|$(realpath "$TOP/src/spek")"
+QUEUE="$EXE|$(realpath "$TOP/src/spek") $CLI|$(realpath "$TOP/src/spek-cli")"
 while [ -n "$QUEUE" ]; do
     NEXT=""
     for item in $QUEUE; do
@@ -151,7 +153,7 @@ while [ -n "$QUEUE" ]; do
             [ -n "$reallib" ] || continue
             libname=$(basename "$reallib")
             # A dylib lists its own install name too; that is fixed with -id below.
-            if [ "$libname" = "$(basename "$bin")" ] && [ "$bin" != "$EXE" ]; then
+            if [ "$libname" = "$(basename "$bin")" ] && [ "$bin" != "$EXE" ] && [ "$bin" != "$CLI" ]; then
                 continue
             fi
             install_name_tool -change "$dep" "@executable_path/../Frameworks/$libname" "$bin" 2>/dev/null
@@ -169,7 +171,7 @@ done
 
 # Fail if anything still points outside the bundle or the OS.
 LEAKS=0
-for bin in "$EXE" "$FW"/*; do
+for bin in "$EXE" "$CLI" "$FW"/*; do
     for dep in $(otool -L "$bin" | tail -n +2 | awk '{print $1}'); do
         case "$dep" in
             /usr/lib/*|/System/*|@executable_path/../Frameworks/*) ;;
@@ -181,7 +183,7 @@ done
 
 # The app can't run on a macOS older than the newest deployment target among
 # the binaries it carries (Homebrew bottles target the macOS they were built for).
-MINOS=$(for bin in "$EXE" "$FW"/*; do
+MINOS=$(for bin in "$EXE" "$CLI" "$FW"/*; do
     otool -l "$bin" | awk '$1 == "cmd" && $2 == "LC_BUILD_VERSION" { f = 1 } f && $1 == "minos" { print $2; f = 0 }'
 done | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
 if [ -n "$MINOS" ]; then
@@ -191,6 +193,7 @@ fi
 # install_name_tool invalidated any signatures; Apple Silicon won't load
 # unsigned code, so sign every library, then the app itself.
 codesign --force --sign "$CODESIGN_IDENTITY" "$FW"/*
+codesign --force --sign "$CODESIGN_IDENTITY" "$CLI"
 codesign --force --sign "$CODESIGN_IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
 
