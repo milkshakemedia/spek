@@ -56,7 +56,7 @@ const char *EXTENSIONS[] = {
 const int FFT_BITS = 10;   // 513 frequency rows
 const double LRANGE = -120.0;
 const double URANGE = 0.0;
-const int LPAD = 46, TPAD = 10, RPAD = 10, BPAD = 24;
+const int LPAD = 46, TPAD = 10, RPAD = 60, BPAD = 24;
 
 #ifdef _WIN32
 const char SEP = '\\';
@@ -295,21 +295,45 @@ bool spectrogram(const std::string& in, const std::string& out, int width, const
 
     // The evidence: the cutoff the verdict rests on, dashed, across the
     // lossy segments only when the file is mixed.
+    // Thick dashes with a black outline, so they stand out on any part of the
+    // palette, and the frequency written in the right margin beside a marker.
+    auto ypos = [&](double hz) { return TPAD + h - 1 - (int)lround(hz / nyquist * (h - 1)); };
     auto hline = [&](double hz, int x0, int x1, uint32_t rgb) {
         if (hz <= 0 || hz >= nyquist) return;
-        int y = TPAD + h - 1 - (int)lround(hz / nyquist * (h - 1));
+        const int y = ypos(hz);
         for (int x = x0; x < x1; ++x) {
-            if ((x / 6) % 2 == 0) put(img, LPAD + x, y, rgb);
+            if (x % 16 >= 11) continue;  // 11 on, 5 off
+            for (int dy = -2; dy <= 2; ++dy) {
+                put(img, LPAD + x, y + dy, (dy == -2 || dy == 2) ? 0x000000 : rgb);
+            }
         }
     };
+    auto label = [&](double hz, uint32_t rgb) {
+        if (hz <= 0 || hz >= nyquist) return;
+        const int y = ypos(hz);
+        const int x = LPAD + width + 2;
+        for (int i = 0; i < 6; ++i) {           // a small arrowhead pointing at the line
+            for (int dy = -(5 - i); dy <= 5 - i; ++dy) put(img, x + i, y + dy, rgb);
+        }
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%.1fk", hz / 1000.0);
+        text(img, x + 9, y - 5, buf, rgb);
+    };
+    const uint32_t whole = 0x00ffff, section = 0x80ff00;  // cyan, lime: off the palette
     const CutoffResult& cr = a.cutoff;
     if (cr.verdict == CutoffVerdict::MIXED && a.duration > 0) {
+        double last = -1e9;
         for (const CutoffSegment& s : cr.lossy_segments) {
             int x0 = (int)(s.start / a.duration * width), x1 = (int)(s.end / a.duration * width);
-            hline(s.cutoff_hz, x0, std::min(x1, width), 0xff40ff);
+            hline(s.cutoff_hz, x0, std::min(x1, width), section);
+            if (fabs(s.cutoff_hz - last) > 400) {
+                label(s.cutoff_hz, section);
+                last = s.cutoff_hz;
+            }
         }
     } else if (cr.verdict != CutoffVerdict::FULL_BAND && cr.verdict != CutoffVerdict::UNKNOWN) {
-        hline(cr.cutoff_hz, 0, width, 0x40ffff);
+        hline(cr.cutoff_hz, 0, width, whole);
+        label(cr.cutoff_hz, whole);
     }
 
     return img.SaveFile(wxString::FromUTF8(out.c_str()), wxBITMAP_TYPE_PNG);
