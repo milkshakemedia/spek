@@ -21,7 +21,9 @@ jobs:
         run: |
           # wxwin.m4 is not on aclocal's default path in Homebrew (see dist/osx/README.md).
           WXM4=$(dirname "$(find "$(brew --prefix wxwidgets)/" -name wxwin.m4 | head -1)")
-          export ACLOCAL_PATH="$WXM4:$(brew --prefix)/share/aclocal"
+          # Nor are gettext's macros (share/gettext/m4); without them translations are skipped.
+          GTM4=$(dirname "$(find "$(brew --prefix gettext)/share/" -name gettext.m4 | head -1)")
+          export ACLOCAL_PATH="$WXM4:$GTM4:$(brew --prefix)/share/aclocal"
           # Any use of a deprecated FFmpeg (or wx) API fails the build.
           ./autogen.sh --disable-valgrind CXXFLAGS="-g -O2 -Werror=deprecated-declarations"
       - run: make -j"$(sysctl -n hw.ncpu)"

@@ -40,7 +40,14 @@ if [ "$BUILD" = 1 ]; then
         echo "wxwin.m4 not found; is wxwidgets installed?" >&2
         exit 1
     fi
-    export ACLOCAL_PATH="$(dirname "$WXM4"):$BREW_PREFIX/share/aclocal${ACLOCAL_PATH:+:$ACLOCAL_PATH}"
+    # gettext's m4 macros (AM_GNU_GETTEXT) live in share/gettext/m4 in current
+    # gettext releases; without them configure silently disables translations.
+    GTM4=$(find "$(brew --prefix gettext)/share/" -name gettext.m4 | head -1)
+    if [ -z "$GTM4" ]; then
+        echo "gettext.m4 not found; is gettext installed?" >&2
+        exit 1
+    fi
+    export ACLOCAL_PATH="$(dirname "$WXM4"):$(dirname "$GTM4"):$BREW_PREFIX/share/aclocal${ACLOCAL_PATH:+:$ACLOCAL_PATH}"
     rm -f src/spek
     ./autogen.sh
     make -j"$(sysctl -n hw.ncpu)"
