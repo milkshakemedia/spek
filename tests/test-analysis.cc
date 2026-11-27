@@ -115,6 +115,99 @@ static void test_silence()
     test("no active frames", 0, r.active_frames);
 }
 
+// Deterministic Gaussian noise (sum of 12 uniforms), standard deviation `sd`.
+static std::vector<double> gauss(int count, double sd, uint32_t seed = 88172645u)
+{
+    std::vector<double> out(count);
+    uint32_t x = seed;
+    for (int i = 0; i < count; ++i) {
+        double sum = 0;
+        for (int k = 0; k < 12; ++k) {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            sum += x / 4294967296.0;
+        }
+        out[i] = sd * (sum - 6.0);
+    }
+    return out;
+}
+
+static BitDepthResult depth(const std::vector<int32_t>& samples, int bits)
+{
+    BitDepthAnalyser analyser(bits);
+    size_t pos = 0;
+    while (pos < samples.size()) {
+        size_t n = std::min((size_t)4096, samples.size() - pos);
+        analyser.feed(samples.data() + pos, (int)n);
+        pos += n;
+    }
+    return analyser.finish();
+}
+
+static std::string verdict(const BitDepthResult& r)
+{
+    return bitdepth_verdict_name(r.verdict);
+}
+
+static const int DEPTH_SAMPLES = 400000;
+
+static void test_bitdepth_native()
+{
+    std::vector<double> x = gauss(DEPTH_SAMPLES, 65536.0);
+    std::vector<int32_t> s(x.size());
+    for (size_t i = 0; i < x.size(); ++i) s[i] = (int32_t)lrint(x[i]);
+    BitDepthResult r = depth(s, 24);
+    test("24-bit noise is native", std::string("native"), verdict(r));
+    test("no zero low bits", 0, r.zero_low_bits);
+    test("no comb", true, r.comb_db < 19.0);
+
+    std::vector<int32_t> s16(x.size());
+    for (size_t i = 0; i < x.size(); ++i) s16[i] = (int32_t)lrint(x[i] / 256.0);
+    test("16-bit noise in a 16-bit file is native", std::string("native"), verdict(depth(s16, 16)));
+}
+
+static void test_bitdepth_padded()
+{
+    std::vector<double> x = gauss(DEPTH_SAMPLES, 256.0);
+    std::vector<int32_t> s(x.size());
+    for (size_t i = 0; i < x.size(); ++i) s[i] = (int32_t)lrint(x[i]) * 256;
+    BitDepthResult r = depth(s, 24);
+    test("16-bit padded with zeros is padded", std::string("padded"), verdict(r));
+    test("8 zero low bits", 8, r.zero_low_bits);
+    test("effective 16 bits", 16, r.effective_bits);
+}
+
+static void test_bitdepth_requantised()
+{
+    std::vector<double> x = gauss(DEPTH_SAMPLES, 256.0);
+    std::vector<double> dither = gauss(DEPTH_SAMPLES, 4.0, 1234567u);
+    std::vector<int32_t> gained(x.size()), dithered(x.size());
+    const double g = pow(10.0, -0.5 / 20);
+    for (size_t i = 0; i < x.size(); ++i) {
+        double v16 = (double)lrint(x[i]);
+        gained[i] = (int32_t)lrint(v16 * 256.0 * g);
+        dithered[i] = (int32_t)lrint(v16 * 256.0 + dither[i]);
+    }
+    BitDepthResult r = depth(gained, 24);
+    test("16-bit with a gain change is requantised", std::string("requantised"), verdict(r));
+    test("lattice step 256 * gain", true, fabs(r.comb_period - 256.0 * g) < 2.0);
+    test("gain change: effective 16 bits", 16, r.effective_bits);
+
+    r = depth(dithered, 24);
+    test("16-bit with 24-bit dither is requantised", std::string("requantised"), verdict(r));
+    test("lattice step 256", true, fabs(r.comb_period - 256.0) < 2.0);
+    test("dither: effective 16 bits", 16, r.effective_bits);
+}
+
+static void test_bitdepth_silence()
+{
+    test("silence is unknown", std::string("unknown"),
+         verdict(depth(std::vector<int32_t>(DEPTH_SAMPLES, 0), 24)));
+    test("32-bit is unknown", std::string("unknown"),
+         verdict(depth(std::vector<int32_t>(1000, 1), 32)));
+}
+
 void test_analysis()
 {
     run("cutoff full band", test_full_band);
@@ -122,4 +215,8 @@ void test_analysis()
     run("cutoff upsampled", test_upsampled);
     run("cutoff mixed", test_mixed);
     run("cutoff silence", test_silence);
+    run("bit depth native", test_bitdepth_native);
+    run("bit depth padded", test_bitdepth_padded);
+    run("bit depth requantised", test_bitdepth_requantised);
+    run("bit depth silence", test_bitdepth_silence);
 }

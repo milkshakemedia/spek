@@ -92,9 +92,10 @@ label:
 
     tests/corpus/score.py tests/corpus/out --report scores.csv
 
-Each file comes out correct, partial (a fake flagged as the wrong kind of fake),
-missed, false (a genuine file flagged) or wrong. CI fails on any false positive,
-or if fewer files are correct than the last accepted count.
+Each file comes out correct, partial (a fake flagged as the wrong kind of fake,
+or with the wrong source depth), missed, false (a file flagged for something it
+isn't) or wrong, once per detector. CI fails on any false positive, or if fewer
+files are correct than the last accepted count.
 
 ### Frequency cutoff (Phase 2b)
 
@@ -125,3 +126,31 @@ What it can't do yet:
   sparse swresample file). A file is still called upsampled when at least a
   quarter of its frames share one band-limit edge within 750 Hz; genuine files
   put at most 3 of 234 frames on a shared edge.
+
+### True bit depth (Phase 2c)
+
+70 of 70 correct, 0 false positives. All 9 fake 24-bit files are flagged with
+the right source depth (16 bits):
+
+| Fake | How it's caught |
+|---|---|
+| zero-padded | the low 8 bits are zero in every sample |
+| -0.5 dB gain, requantised | sample values sit on a lattice with a 241.7-code step (256 x 10^(-0.5/20)) |
+| low-level 24-bit dither | the lattice step is 256 codes, smeared by the noise but still clear |
+
+The lattice shows as a "comb" in the histogram of sample values near zero:
+the histogram's smooth shape is subtracted and the spectrum of what's left is
+searched for a sharp peak at a step of 12 to 512 codes (a 15- to 20-bit
+source). On the corpus genuine files peak at 12.6 dB above their neighbours,
+resampled and lossy decodes at 15.0 dB, and the fakes at 22.2 dB or more; the
+threshold is 19 dB.
+
+Worth knowing:
+
+- **16-bit files are only checked for zero low bits.** There's no lower depth
+  worth looking for.
+- **A genuine 20-bit recording** (many 1990s converters) in a 24-bit file is
+  reported as padded or requantised to 20 bits. That's the truth about the
+  file, but not a sign of a fake.
+- **A 16-bit master upsampled to 96/24** is reported as native. Resampling
+  fills the low bits for real, so that's the cutoff detector's job.
