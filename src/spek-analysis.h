@@ -6,6 +6,7 @@
 // line tool and the tests can share it. Results are evidence, not proof: every
 // field a verdict rests on is reported so a person can check it.
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -100,3 +101,55 @@ private:
 
 // Decode the first channel of an open audio file and analyse it.
 CutoffResult analyse_cutoff(AudioFile& file);
+
+// ---------------------------------------------------------------------------
+// True bit depth.
+//
+// A 16-bit master in a 24-bit file shows one of two traces. Padded with zeros,
+// the low bits are never set. Gain-changed or dithered on the way, the low
+// bits are busy but the sample values still crowd around a lattice with the
+// 16-bit step (a little off it after a gain change), which shows as a strong
+// periodic "comb" in the histogram of sample values near zero. A genuine
+// 24-bit recording's histogram is smooth at that scale.
+
+enum class BitDepthVerdict
+{
+    UNKNOWN,           // not integer PCM, too quiet, or too short to judge
+    NATIVE,            // uses the container's full depth
+    PADDED,            // low bits always zero
+    REQUANTISED,       // low bits busy, but values sit on a coarser lattice
+};
+
+const char *bitdepth_verdict_name(BitDepthVerdict verdict);
+
+struct BitDepthResult
+{
+    int container_bits = 0;   // bits per sample the file stores
+    int effective_bits = 0;   // for PADDED/REQUANTISED: the likely source depth
+    int zero_low_bits = 0;    // low bits that are zero in every sample
+    double comb_period = 0;   // lattice step found, in container codes (0: none)
+    double comb_db = 0;       // how far the comb peak stands above its neighbours
+    long long samples = 0;    // samples analysed
+    BitDepthVerdict verdict = BitDepthVerdict::UNKNOWN;
+};
+
+class BitDepthAnalyser
+{
+public:
+    // container_bits: 16 or 24. Other depths are reported as UNKNOWN.
+    explicit BitDepthAnalyser(int container_bits);
+
+    // Feed integer samples at the container's depth, in any block size.
+    void feed(const int32_t *samples, int count);
+    BitDepthResult finish();
+
+private:
+    int container_bits;
+    uint32_t used_bits;           // OR of the magnitudes of every sample
+    long long samples;
+    int range;                    // histogram covers -range .. range-1
+    std::vector<uint32_t> hist;   // counts of sample values near zero
+};
+
+// Decode the first channel of an open audio file and analyse its bit depth.
+BitDepthResult analyse_bitdepth(AudioFile& file);

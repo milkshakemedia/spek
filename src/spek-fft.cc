@@ -55,7 +55,7 @@ void FFTPlanImpl::execute()
     // Calculate magnitudes. Unlike av_rdft, av_tx does not pack the Nyquist
     // bin into the imaginary part of the DC bin: bins 0..N/2 are all explicit.
     int n = this->get_input_size();
-    float n2 = n * n;
+    float n2 = (float)n * n;  // in float: n * n overflows an int above 2^15 points
     for (int i = 0; i <= n / 2; i++) {
         float re = this->tmp[i].re;
         float im = this->tmp[i].im;

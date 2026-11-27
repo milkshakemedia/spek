@@ -1,4 +1,5 @@
-// Development driver for the analysis engine: prints one JSON object per file.
+// Development driver for the analysis engine: prints one JSON object per file
+// with each detector's result.
 // Used by tests/corpus/score.py to score the detectors against the corpus.
 // (The user-facing batch tool is Phase 3.)
 
@@ -69,7 +70,14 @@ int main(int argc, char **argv)
             }
             printf("]");
         }
-        printf("}}\n");
+        printf("}");
+        auto file2 = audio.open(argv[i], 0);
+        BitDepthResult b = analyse_bitdepth(*file2);
+        printf(", \"bitdepth\": {\"verdict\": \"%s\", \"container_bits\": %d, \"effective_bits\": %d, "
+               "\"zero_low_bits\": %d, \"comb_period\": %.1f, \"comb_db\": %.1f, \"samples\": %lld}",
+               bitdepth_verdict_name(b.verdict), b.container_bits, b.effective_bits, b.zero_low_bits,
+               b.comb_period, b.comb_db, b.samples);
+        printf("}\n");
     }
     return status;
 }

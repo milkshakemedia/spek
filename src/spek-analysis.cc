@@ -434,3 +434,202 @@ CutoffResult analyse_cutoff(AudioFile& file)
     }
     return analyser.finish();
 }
+
+// ---------------------------------------------------------------------------
+// True bit depth.
+
+namespace {
+
+// Histogram reach for 24-bit files, in codes either side of zero: 2^19 codes
+// is 2048 steps of a 16-bit source, plenty to see a lattice.
+const int HIST_RANGE_24 = 1 << 19;
+// The comb test wants this many samples inside its window ...
+const long long COMB_SAMPLES = 200000;
+// ... and never looks at less than this many codes either side of zero.
+const int COMB_MIN_RANGE = 1 << 16;
+// Too few samples near zero to judge.
+const long long COMB_MIN_SAMPLES = 20000;
+// The histogram's own shape is removed with a moving average this wide.
+const int COMB_SMOOTH = 1024;
+// Lattice steps looked for, in 24-bit codes: 12 (a 20-bit source) to 512
+// (a 15-bit source). Shorter periods say nothing about a lower source depth.
+const double COMB_MIN_PERIOD = 12.0;
+const double COMB_MAX_PERIOD = 512.0;
+// Each spectrum bin is compared with the median of this many bins either side.
+const int COMB_NEIGHBOURS = 40;
+// A comb peak must stand this far above its neighbours. Corpus: genuine files
+// reach 12.6 dB at most, resampled and lossy ones 15.0 dB, fake 24-bit files
+// 22.2 dB or more. The neighbourhood median of pure noise puts the largest of
+// tens of thousands of bins about 12 dB up by chance alone.
+const double COMB_MIN_DB = 19.0;
+// Zero low bits in every sample this many or more means padding (a 20-bit or
+// shallower source); fewer could be chance in a short quiet file.
+const int PAD_MIN_BITS = 4;
+
+} // namespace
+
+const char *bitdepth_verdict_name(BitDepthVerdict verdict)
+{
+    switch (verdict) {
+    case BitDepthVerdict::NATIVE: return "native";
+    case BitDepthVerdict::PADDED: return "padded";
+    case BitDepthVerdict::REQUANTISED: return "requantised";
+    case BitDepthVerdict::UNKNOWN: break;
+    }
+    return "unknown";
+}
+
+BitDepthAnalyser::BitDepthAnalyser(int container_bits) :
+    container_bits(container_bits), used_bits(0), samples(0),
+    range(container_bits == 24 ? HIST_RANGE_24 : 0), hist(2 * (size_t)range, 0)
+{
+}
+
+void BitDepthAnalyser::feed(const int32_t *samples, int count)
+{
+    for (int i = 0; i < count; ++i) {
+        int32_t v = samples[i];
+        this->used_bits |= (uint32_t)(v < 0 ? -(int64_t)v : v);
+        if (v >= -this->range && v < this->range) {
+            ++this->hist[v + this->range];
+        }
+    }
+    this->samples += count;
+}
+
+BitDepthResult BitDepthAnalyser::finish()
+{
+    BitDepthResult r;
+    r.container_bits = this->container_bits;
+    r.samples = this->samples;
+    if ((this->container_bits != 16 && this->container_bits != 24) || this->used_bits == 0) {
+        return r;
+    }
+
+    while (r.zero_low_bits < this->container_bits && !(this->used_bits & (1u << r.zero_low_bits))) {
+        ++r.zero_low_bits;
+    }
+    if (r.zero_low_bits >= PAD_MIN_BITS) {
+        r.verdict = BitDepthVerdict::PADDED;
+        r.effective_bits = this->container_bits - r.zero_low_bits;
+        return r;
+    }
+    r.verdict = BitDepthVerdict::NATIVE;
+    if (this->range == 0) {
+        return r;  // a 16-bit file has no lower depth worth looking for
+    }
+
+    // Window: the smallest power of two either side of zero holding enough
+    // samples, so quiet and loud files get a comparable test.
+    long long inside = this->hist[this->range];
+    int reach = 1;
+    while (reach < this->range && inside < COMB_SAMPLES) {
+        inside += this->hist[this->range + reach] + this->hist[this->range - reach];
+        ++reach;
+    }
+    int w = COMB_MIN_RANGE;
+    while (w < reach && w < this->range) {
+        w <<= 1;
+    }
+    const int n = 2 * w;
+    long long in_window = 0;
+    for (int i = -w; i < w; ++i) {
+        in_window += this->hist[this->range + i];
+    }
+    if (in_window < COMB_MIN_SAMPLES) {
+        r.verdict = BitDepthVerdict::UNKNOWN;
+        return r;
+    }
+
+    // Remove the histogram's smooth shape, keep the fine structure.
+    std::vector<double> prefix(n + 1, 0.0);
+    for (int i = 0; i < n; ++i) {
+        prefix[i + 1] = prefix[i] + this->hist[this->range - w + i];
+    }
+    int nbits = 0;
+    while ((1 << nbits) < n) {
+        ++nbits;
+    }
+    std::unique_ptr<FFTPlan> plan = FFT().create(nbits);
+    const int half = COMB_SMOOTH / 2;
+    for (int i = 0; i < n; ++i) {
+        float v = 0.0f;
+        if (i >= COMB_SMOOTH && i < n - COMB_SMOOTH) {
+            double mean = (prefix[i + half] - prefix[i - half]) / COMB_SMOOTH;
+            v = (float)(this->hist[this->range - w + i] - mean);
+        }
+        plan->set_input(i, v);
+    }
+    plan->execute();
+
+    // A lattice of step P puts a sharp peak at bin n/P (and its harmonics).
+    const int lo = (int)(n / COMB_MAX_PERIOD) + 1;
+    const int hi = std::min((int)(n / COMB_MIN_PERIOD), plan->get_output_size() - COMB_NEIGHBOURS - 1);
+    std::vector<double> prominence(hi + 1, -1e9);
+    std::vector<double> local;
+    double best = -1e9;
+    for (int k = lo; k <= hi; ++k) {
+        local.clear();
+        for (int j = k - COMB_NEIGHBOURS; j <= k + COMB_NEIGHBOURS; ++j) {
+            local.push_back(plan->get_output(j));
+        }
+        prominence[k] = plan->get_output(k) - median(local);
+        best = std::max(best, prominence[k]);
+    }
+    r.comb_db = best;
+    if (best < COMB_MIN_DB) {
+        return r;
+    }
+    // The strongest peak may be a harmonic of the lattice step. The step is
+    // the longest one whose fundamental, at a whole fraction of the strongest
+    // bin, still stands out on its own.
+    int peak = lo;
+    for (int k = lo; k <= hi; ++k) {
+        if (prominence[k] > prominence[peak]) {
+            peak = k;
+        }
+    }
+    int fundamental = peak;
+    for (int m = 2; peak / m >= lo; ++m) {
+        int c = (int)lround((double)peak / m);
+        double p = -1e9;
+        int at = c;
+        for (int j = std::max(lo, c - 1); j <= std::min(hi, c + 1); ++j) {
+            if (prominence[j] > p) {
+                p = prominence[j];
+                at = j;
+            }
+        }
+        if (p >= COMB_MIN_DB) {
+            fundamental = at;
+        }
+    }
+    r.comb_period = (double)n / fundamental;
+    r.verdict = BitDepthVerdict::REQUANTISED;
+    r.effective_bits = (int)lround(this->container_bits - log2(r.comb_period));
+    return r;
+}
+
+BitDepthResult analyse_bitdepth(AudioFile& file)
+{
+    const int bits = file.get_bits_per_sample();
+    BitDepthAnalyser analyser(bits);
+    if (!!file.get_error() || (bits != 16 && bits != 24)) {
+        return analyser.finish();
+    }
+    // The decoder hands out floats: 16-bit samples divided by 32767, 24-bit
+    // ones (carried in 32 bits) divided by 2^31, both exactly reversible.
+    const float scale = bits == 16 ? 32767.0f : 8388608.0f;
+    std::vector<int32_t> ints;
+    file.start(0, 1);
+    int n;
+    while ((n = file.read()) > 0) {
+        const float *buf = file.get_buffer();
+        ints.resize(n);
+        for (int i = 0; i < n; ++i) {
+            ints[i] = (int32_t)lrintf(buf[i] * scale);
+        }
+        analyser.feed(ints.data(), n);
+    }
+    return analyser.finish();
+}
