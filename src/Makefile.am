@@ -1,6 +1,8 @@
 noinst_LIBRARIES = libspek.a
 
 libspek_a_SOURCES = \
+	spek-analysis.cc \
+	spek-analysis.h \
 	spek-audio.cc \
 	spek-audio.h \
 	spek-fft.cc \

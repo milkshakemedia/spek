@@ -83,3 +83,45 @@ Things it found while the corpus was built, worth knowing for the rules:
 - **The sparse genuine file falls about 20 dB across 22 kHz** on its own, just
   from the natural roll-off of the music. An upsampled file falls 60 dB or more.
   Any upsampling threshold has to sit between those.
+
+## Scoring the detectors
+
+`score.py` runs the development driver (`tests/spek-analyze`, built with
+`make -C tests spek-analyze`) on every file and compares its verdict with the
+label:
+
+    tests/corpus/score.py tests/corpus/out --report scores.csv
+
+Each file comes out correct, partial (a fake flagged as the wrong kind of fake),
+missed, false (a genuine file flagged) or wrong. CI fails on any false positive,
+or if fewer files are correct than the last accepted count.
+
+### Frequency cutoff (Phase 2b)
+
+57 of 70 correct, 4 partial, 9 missed, 0 false positives:
+
+| Label | Result |
+|---|---|
+| genuine (12) | all full-band |
+| padded bits (9) | all full-band (that's the bit-depth detector's job) |
+| lossy (24) | 14 correct, 1 partial, 9 missed |
+| upsampled (12) | all correct, source rate right |
+| lossy+upsampled (10) | 7 correct, 3 reported as upsampled |
+| mixed (3) | all correct, segments within 0.2 s |
+
+What it can't do yet:
+
+- **Lossy encodes with no visible low-pass**: all 9 misses. AAC 256k, LAME V0
+  and Vorbis q6 keep the full band; on the sparse source MP3 320k's 20 kHz
+  low-pass sits where the music already ends. They need a detector that looks
+  for the encoder's holes and smearing rather than a shelf.
+- **AAC 256k upsampled to 96k** cuts at 21.2 kHz, above the 21 kHz lossy line,
+  so it's reported as upsampled from 44.1k. That's true, just not the whole story.
+- **Quiet, sparse 16-bit lossy files** have no frame where the shelf rises above
+  the dither floor. These are caught only by the whole-file power average
+  (reported with `basis: average` and confidence 0.5), which needs a 12 dB brick
+  wall; false positives start at 6 dB.
+- **Quiet upsampled files** show the band edge in only some frames (36% for the
+  sparse swresample file). A file is still called upsampled when at least a
+  quarter of its frames share one band-limit edge within 750 Hz; genuine files
+  put at most 3 of 234 frames on a shared edge.
