@@ -116,17 +116,25 @@ jobs:
       - run: make check || { cat tests/test-suite.log; exit 1; }
 
   corpus:
-    # Rebuild the detector test corpus and check every label holds.
+    # Rebuild the detector test corpus, check every label holds, and score the detectors.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg python3-numpy
+          sudo apt-get install -y ffmpeg python3-numpy autoconf automake libtool intltool \
+            gettext autopoint pkg-config libwxgtk3.2-dev libavformat-dev libavcodec-dev libavutil-dev
           ffmpeg -version | head -1
       - run: tests/corpus/generate.py --out "$RUNNER_TEMP/corpus"
       - run: tests/corpus/verify.py "$RUNNER_TEMP/corpus" --report "$RUNNER_TEMP/corpus/verify.csv"
+      - name: Build the analysis driver
+        run: ./autogen.sh && make -j"$(nproc)" && make -C tests spek-analyze
+      # Score the detectors. No false positives allowed, and the correct count
+      # may only go up: raise --min-correct when a change improves it.
+      - run: >
+          tests/corpus/score.py "$RUNNER_TEMP/corpus" --report "$RUNNER_TEMP/corpus/score.csv"
+          --max-false 0 --min-correct 57
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -134,3 +142,4 @@ jobs:
           path: |
             ${{ runner.temp }}/corpus/manifest.csv
             ${{ runner.temp }}/corpus/verify.csv
+            ${{ runner.temp }}/corpus/score.csv

@@ -7,6 +7,7 @@ int main()
 {
     std::cerr << "-------------" << std::endl;
 
+    test_analysis();
     test_audio();
     test_fft();
     test_utils();

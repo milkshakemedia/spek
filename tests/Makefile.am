@@ -8,10 +8,15 @@ endif
 
 check_PROGRAMS = $(TESTS)
 
+# Development driver used by tests/corpus/score.py; built by make, not installed.
+noinst_PROGRAMS = spek-analyze
+spek_analyze_SOURCES = spek-analyze.cc
+
 perf_SOURCES = \
 	perf.cc
 
 test_SOURCES = \
+	test-analysis.cc \
 	test-audio.cc \
 	test-fft.cc \
 	test-utils.cc \
