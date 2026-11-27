@@ -25,9 +25,7 @@ jobs:
           GTM4=$(dirname "$(find "$(brew --prefix gettext)/share/" -name gettext.m4 | head -1)")
           export ACLOCAL_PATH="$WXM4:$GTM4:$(brew --prefix)/share/aclocal"
           # Any use of a deprecated FFmpeg (or wx) API fails the build.
-          # --with-libintl-prefix: configure only builds po/*.gmo when it finds libintl.
-          ./autogen.sh --disable-valgrind --with-libintl-prefix="$(brew --prefix gettext)" \
-            CXXFLAGS="-g -O2 -Werror=deprecated-declarations"
+          ./autogen.sh --disable-valgrind CXXFLAGS="-g -O2 -Werror=deprecated-declarations"
       - run: make -j"$(sysctl -n hw.ncpu)"
       - run: make check || { cat tests/test-suite.log; exit 1; }
       - name: Bundle Spek.app and Spek.dmg

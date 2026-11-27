@@ -49,10 +49,7 @@ if [ "$BUILD" = 1 ]; then
     fi
     export ACLOCAL_PATH="$(dirname "$WXM4"):$(dirname "$GTM4"):$BREW_PREFIX/share/aclocal${ACLOCAL_PATH:+:$ACLOCAL_PATH}"
     rm -f src/spek
-    # Spek translates through wxWidgets, not libintl, but configure only builds
-    # the po/*.gmo catalogs when it finds libintl, which Homebrew keeps off the
-    # default search path.
-    ./autogen.sh --with-libintl-prefix="$(brew --prefix gettext)"
+    ./autogen.sh
     make -j"$(sysctl -n hw.ncpu)"
 fi
 
@@ -80,7 +77,10 @@ cp "$TOP"/lic/* "$APP/Contents/Resources/lic/"
 
 for lang in $LANGUAGES; do
     mkdir -p "$APP/Contents/Resources/$lang.lproj"
-    cp "$TOP/po/$lang.gmo" "$APP/Contents/Resources/$lang.lproj/spek.mo"
+    # Compile the catalogs here rather than relying on po/*.gmo: configure only
+    # builds those when it finds a libintl, which it often doesn't with Homebrew,
+    # and Spek doesn't need libintl anyway (wxWidgets reads the .mo files).
+    msgfmt -c -o "$APP/Contents/Resources/$lang.lproj/spek.mo" "$TOP/po/$lang.po"
     wxmo="$BREW_PREFIX/share/locale/$lang/LC_MESSAGES/wxstd-$WX_RELEASE.mo"
     if [ -f "$wxmo" ]; then
         cp "$wxmo" "$APP/Contents/Resources/$lang.lproj/"
