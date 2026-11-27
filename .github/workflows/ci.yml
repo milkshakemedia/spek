@@ -1,4 +1,3 @@
-# Linux jobs mirror builds verified locally; macOS and Windows jobs are new and unverified.
 name: CI
 
 on:
@@ -23,16 +22,41 @@ jobs:
           # wxwin.m4 is not on aclocal's default path in Homebrew (see dist/osx/README.md).
           WXM4=$(dirname "$(find "$(brew --prefix wxwidgets)/" -name wxwin.m4 | head -1)")
           export ACLOCAL_PATH="$WXM4:$(brew --prefix)/share/aclocal"
-          ./autogen.sh --disable-valgrind
+          # Any use of a deprecated FFmpeg (or wx) API fails the build.
+          ./autogen.sh --disable-valgrind CXXFLAGS="-g -O2 -Werror=deprecated-declarations"
       - run: make -j"$(sysctl -n hw.ncpu)"
       - run: make check || { cat tests/test-suite.log; exit 1; }
+      - name: Bundle Spek.app and Spek.dmg
+        run: ./dist/osx/bundle.sh --no-build
+      - name: Check the bundle is native and self-contained
+        run: |
+          cd dist/osx
+          EXE=Spek.app/Contents/MacOS/Spek
+          lipo -archs "$EXE"
+          [ "$(lipo -archs "$EXE")" = arm64 ]
+          codesign --verify --deep --strict --verbose=2 Spek.app
+          /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" Spek.app/Contents/Info.plist
+          # Launch it and fail if dyld loads anything from Homebrew.
+          DYLD_PRINT_LIBRARIES=1 "$EXE" --version 2> dyld.log
+          if grep "$(brew --prefix)" dyld.log; then
+            echo "Spek.app loads libraries from Homebrew" >&2
+            exit 1
+          fi
+          echo "$(grep -c Frameworks dyld.log) libraries loaded from the bundle"
+          hdiutil verify Spek.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Spek-macos-arm64
+          path: dist/osx/Spek.dmg
+          if-no-files-found: error
 
   linux:
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        ffmpeg: [distro, n7.1.5, n9.1]   # distro = Ubuntu 24.04's FFmpeg 6.1
+        # n6.0.1 is the oldest FFmpeg configure accepts; distro = Ubuntu 24.04's FFmpeg 6.1.
+        ffmpeg: [n6.0.1, distro, n7.1.5, n9.1]
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
@@ -64,7 +88,7 @@ jobs:
         run: |
           echo "PKG_CONFIG_PATH=$HOME/ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$HOME/ffmpeg/lib" >> "$GITHUB_ENV"
-      - run: ./autogen.sh
+      - run: ./autogen.sh CXXFLAGS="-g -O2 -Werror=deprecated-declarations"
       - run: make -j"$(nproc)"
       - run: make check || { cat tests/test-suite.log; exit 1; }   # runs under valgrind
 
