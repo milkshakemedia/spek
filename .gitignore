@@ -58,3 +58,4 @@ xmldocs.make
 
 # Generated test corpus
 tests/corpus/out/
+__pycache__/
