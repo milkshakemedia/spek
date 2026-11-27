@@ -1,5 +1,8 @@
 #include <wx/artprov.h>
 #include <wx/iconbndl.h>
+#include <wx/image.h>
+#include <wx/settings.h>
+#include <wx/stdpaths.h>
 
 #include "spek-artwork.h"
 
@@ -45,20 +48,6 @@ wxBitmap SpekArtProvider::CreateBitmap(
         return wxIcon("close", wxBITMAP_TYPE_ICO_RESOURCE, 16, 16);
     }
 #endif
-#ifdef OS_OSX
-    if (id == ART_HELP) {
-        return wxBitmap("help", wxBITMAP_TYPE_PNG_RESOURCE);
-    }
-    if (id == ART_OPEN) {
-        return wxBitmap("open", wxBITMAP_TYPE_PNG_RESOURCE);
-    }
-    if (id == ART_SAVE) {
-        return wxBitmap("save", wxBITMAP_TYPE_PNG_RESOURCE);
-    }
-    if (id == ART_CLOSE) {
-        return wxBitmap("close", wxBITMAP_TYPE_PNG_RESOURCE);
-    }
-#endif
     return wxNullBitmap;
 }
 
@@ -85,6 +74,43 @@ wxIconBundle SpekArtProvider::CreateIconBundle(const wxArtID& id, const wxArtCli
     }
 #endif
     return wxNullIconBundle;
+}
+
+#ifdef OS_OSX
+// Line icons drawn in black on transparent (dist/icons), at 1x and 2x,
+// recoloured like the system's own toolbar symbols.
+static wxBitmapBundle tinted(const wxString& name)
+{
+    const wxString dir = wxStandardPaths::Get().GetResourcesDir();
+    const bool dark = wxSystemSettings::GetAppearance().IsDark();
+    const unsigned char level = dark ? 255 : 0;
+    const double opacity = dark ? 0.85 : 0.78;
+    wxVector<wxBitmap> bitmaps;
+    for (const char *suffix : { "", "@2x" }) {
+        wxImage img;
+        if (!img.LoadFile(dir + "/" + name + suffix + ".png", wxBITMAP_TYPE_PNG)) continue;
+        if (!img.HasAlpha()) img.InitAlpha();
+        unsigned char *rgb = img.GetData(), *alpha = img.GetAlpha();
+        const int n = img.GetWidth() * img.GetHeight();
+        for (int i = 0; i < n; ++i) {
+            rgb[3 * i] = rgb[3 * i + 1] = rgb[3 * i + 2] = level;
+            alpha[i] = (unsigned char)(alpha[i] * opacity + 0.5);
+        }
+        bitmaps.push_back(wxBitmap(img));
+    }
+    return wxBitmapBundle::FromBitmaps(bitmaps);
+}
+#endif
+
+wxBitmapBundle spek_artwork_icon(const wxArtID& id, const wxArtClient& client)
+{
+#ifdef OS_OSX
+    if (id == ART_OPEN) return tinted("open");
+    if (id == ART_SAVE) return tinted("save");
+    if (id == ART_HELP) return tinted("help");
+    if (id == ART_CLOSE) return tinted("close");
+#endif
+    return wxArtProvider::GetBitmapBundle(id, client);
 }
 
 void spek_artwork_init()

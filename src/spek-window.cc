@@ -28,6 +28,7 @@ BEGIN_EVENT_TABLE(SpekWindow, wxFrame)
     EVT_MENU(wxID_HELP, SpekWindow::on_help)
     EVT_MENU(wxID_ABOUT, SpekWindow::on_about)
     EVT_COMMAND(-1, SPEK_NOTIFY_EVENT, SpekWindow::on_notify)
+    EVT_SYS_COLOUR_CHANGED(SpekWindow::on_sys_colour)
 END_EVENT_TABLE()
 
 // Forward declarations.
@@ -94,20 +95,20 @@ SpekWindow::SpekWindow(const wxString& path) :
     toolbar->AddTool(
         wxID_OPEN,
         wxEmptyString,
-        wxArtProvider::GetBitmap(ART_OPEN, wxART_TOOLBAR),
+        spek_artwork_icon(ART_OPEN, wxART_TOOLBAR),
         menu_file_open->GetItemLabelText()
     );
     toolbar->AddTool(
         wxID_SAVE,
         wxEmptyString,
-        wxArtProvider::GetBitmap(ART_SAVE, wxART_TOOLBAR),
+        spek_artwork_icon(ART_SAVE, wxART_TOOLBAR),
         menu_file_save->GetItemLabelText()
     );
     toolbar->AddStretchableSpace();
     toolbar->AddTool(
         wxID_HELP,
         wxEmptyString,
-        wxArtProvider::GetBitmap(ART_HELP, wxART_TOOLBAR),
+        spek_artwork_icon(ART_HELP, wxART_TOOLBAR),
         _("Help")
     );
     toolbar->Realize();
@@ -127,8 +128,8 @@ SpekWindow::SpekWindow(const wxString& path) :
     // This second Connect() handles clicks on the border
     info_bar->Connect(wxEVT_LEFT_DOWN, wxCommandEventHandler(SpekWindow::on_visit));
     info_sizer->Add(label, 1, wxALIGN_CENTER_VERTICAL | wxALL, 6);
-    wxBitmapButton *button = new wxBitmapButton(
-        info_bar, -1, wxArtProvider::GetBitmap(ART_CLOSE, wxART_BUTTON),
+    wxBitmapButton *button = this->close_button = new wxBitmapButton(
+        info_bar, -1, spek_artwork_icon(ART_CLOSE, wxART_BUTTON),
         wxDefaultPosition, wxDefaultSize, wxNO_BORDER);
     button->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(SpekWindow::on_close));
     info_sizer->Add(button, 0, wxALIGN_CENTER_VERTICAL);
@@ -337,6 +338,25 @@ void SpekWindow::on_notify(wxCommandEvent&)
 void SpekWindow::on_visit(wxCommandEvent&)
 {
     wxLaunchDefaultBrowser("https://www.spek.cc");
+}
+
+void SpekWindow::on_sys_colour(wxSysColourChangedEvent& event)
+{
+    set_icons();
+    event.Skip();
+}
+
+// Light and dark mode want different icon colours on macOS.
+void SpekWindow::set_icons()
+{
+    if (wxToolBar *toolbar = GetToolBar()) {
+        toolbar->SetToolNormalBitmap(wxID_OPEN, spek_artwork_icon(ART_OPEN, wxART_TOOLBAR));
+        toolbar->SetToolNormalBitmap(wxID_SAVE, spek_artwork_icon(ART_SAVE, wxART_TOOLBAR));
+        toolbar->SetToolNormalBitmap(wxID_HELP, spek_artwork_icon(ART_HELP, wxART_TOOLBAR));
+    }
+    if (this->close_button) {
+        this->close_button->SetBitmap(spek_artwork_icon(ART_CLOSE, wxART_BUTTON));
+    }
 }
 
 void SpekWindow::on_close(wxCommandEvent& event)

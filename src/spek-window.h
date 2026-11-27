@@ -20,8 +20,11 @@ private:
     void on_notify(wxCommandEvent& event);
     void on_visit(wxCommandEvent& event);
     void on_close(wxCommandEvent& event);
+    void on_sys_colour(wxSysColourChangedEvent& event);
+    void set_icons();
 
     SpekSpectrogram *spectrogram;
+    wxBitmapButton *close_button = nullptr;
     wxString path;
     wxString cur_dir;
     wxString description;
