@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Spek\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-27 20:12+0000\n"
+"POT-Creation-Date: 2023-01-09 19:59-0800\n"
 "PO-Revision-Date: 2011-02-23 09:25+0000\n"
 "Last-Translator: Zames Dean <zdci4li@gmail.com>, 2014,2022\n"
 "Language-Team: Korean (http://www.transifex.com/spek/spek/language/ko/)\n"
@@ -137,67 +137,67 @@ msgstr "-00 dB"
 msgid "Spek - Acoustic Spectrum Analyser"
 msgstr "Spek - 음향 스펙트럼 분석기"
 
-#: src/spek-window.cc:74
+#: src/spek-window.cc:73
 msgid "&File"
 msgstr "파일(&F)"
 
-#: src/spek-window.cc:80
+#: src/spek-window.cc:79
 msgid "&Edit"
 msgstr "편집(&E)"
 
-#: src/spek-window.cc:84 src/spek-window.cc:89
+#: src/spek-window.cc:83 src/spek-window.cc:88
 msgid "&Help"
 msgstr "도움말(&H)"
 
-#: src/spek-window.cc:111
+#: src/spek-window.cc:110
 msgid "Help"
 msgstr "도움말"
 
-#: src/spek-window.cc:124
+#: src/spek-window.cc:123
 msgid "A new version of Spek is available, click to download."
 msgstr "Spek의 새 버전이 사용 가능합니다, 다운로드하려면 누르세요."
 
 #. TRANSLATORS: window title, %s is replaced with the file name
-#: src/spek-window.cc:162
+#: src/spek-window.cc:161
 #, c-format
 msgid "Spek - %s"
 msgstr "Spek - %s"
 
-#: src/spek-window.cc:210
+#: src/spek-window.cc:209
 msgid "All files"
 msgstr "모든 파일"
 
-#: src/spek-window.cc:212
+#: src/spek-window.cc:211
 msgid "Audio files"
 msgstr "오디오 파일"
 
-#: src/spek-window.cc:226
+#: src/spek-window.cc:225
 msgid "Open File"
 msgstr "파일 열기"
 
-#: src/spek-window.cc:248
+#: src/spek-window.cc:247
 msgid "PNG images"
 msgstr "PNG 이미지"
 
-#: src/spek-window.cc:254
+#: src/spek-window.cc:253
 msgid "Save Spectrogram"
 msgstr "스펙트로그램 저장"
 
 #. Suggested name is <file_name>.png
-#: src/spek-window.cc:262
+#: src/spek-window.cc:261
 msgid "Untitled"
 msgstr "제목 없음"
 
 #. TRANSLATORS: Add your name here
-#: src/spek-window.cc:316
+#: src/spek-window.cc:315
 msgid "translator-credits"
 msgstr "4Li, 큰돌"
 
-#: src/spek-window.cc:322
+#: src/spek-window.cc:321
 msgid "Copyright (c) 2010-2013 Alexander Kojevnikov and contributors"
 msgstr "저작권 (c) 2010-2013 Alexander Kojevnikov 와 공헌자들"
 
-#: src/spek-window.cc:325
+#: src/spek-window.cc:324
 msgid "Spek Website"
 msgstr "Spek 웹사이트"
 

@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Spek\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-27 20:12+0000\n"
+"POT-Creation-Date: 2023-01-09 19:59-0800\n"
 "PO-Revision-Date: 2011-02-23 09:25+0000\n"
 "Last-Translator: Patrik Škulavík <patrik.skulavik@gmail.com>, 2013-2014\n"
 "Language-Team: Slovak (http://www.transifex.com/spek/spek/language/sk/)\n"
@@ -141,67 +141,67 @@ msgstr "-00 dB"
 msgid "Spek - Acoustic Spectrum Analyser"
 msgstr "Spek - Akustický Spektrálny Analyzátor"
 
-#: src/spek-window.cc:74
+#: src/spek-window.cc:73
 msgid "&File"
 msgstr "&Súbor"
 
-#: src/spek-window.cc:80
+#: src/spek-window.cc:79
 msgid "&Edit"
 msgstr "&Upraviť"
 
-#: src/spek-window.cc:84 src/spek-window.cc:89
+#: src/spek-window.cc:83 src/spek-window.cc:88
 msgid "&Help"
 msgstr "&Nápoveda"
 
-#: src/spek-window.cc:111
+#: src/spek-window.cc:110
 msgid "Help"
 msgstr "Nápoveda"
 
-#: src/spek-window.cc:124
+#: src/spek-window.cc:123
 msgid "A new version of Spek is available, click to download."
 msgstr "Nová verzia programu Spek je dostupná, kliknite pre stiahnutie."
 
 #. TRANSLATORS: window title, %s is replaced with the file name
-#: src/spek-window.cc:162
+#: src/spek-window.cc:161
 #, c-format
 msgid "Spek - %s"
 msgstr "Spek - %s"
 
-#: src/spek-window.cc:210
+#: src/spek-window.cc:209
 msgid "All files"
 msgstr "Všetky súbory"
 
-#: src/spek-window.cc:212
+#: src/spek-window.cc:211
 msgid "Audio files"
 msgstr "Audio súbory"
 
-#: src/spek-window.cc:226
+#: src/spek-window.cc:225
 msgid "Open File"
 msgstr "Otvoriť súbor"
 
-#: src/spek-window.cc:248
+#: src/spek-window.cc:247
 msgid "PNG images"
 msgstr "PNG obrázky"
 
-#: src/spek-window.cc:254
+#: src/spek-window.cc:253
 msgid "Save Spectrogram"
 msgstr "Uložiť Spektrogram"
 
 #. Suggested name is <file_name>.png
-#: src/spek-window.cc:262
+#: src/spek-window.cc:261
 msgid "Untitled"
 msgstr "Bez názvu"
 
 #. TRANSLATORS: Add your name here
-#: src/spek-window.cc:316
+#: src/spek-window.cc:315
 msgid "translator-credits"
 msgstr "Patrik Škulavík"
 
-#: src/spek-window.cc:322
+#: src/spek-window.cc:321
 msgid "Copyright (c) 2010-2013 Alexander Kojevnikov and contributors"
 msgstr "Copyright (c) 2010-2013 Alexander Kojevnikov a prispievatelia"
 
-#: src/spek-window.cc:325
+#: src/spek-window.cc:324
 msgid "Spek Website"
 msgstr "Spek Webová stránka"
 

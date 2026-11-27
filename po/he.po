@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Spek\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-27 20:12+0000\n"
+"POT-Creation-Date: 2023-01-09 19:59-0800\n"
 "PO-Revision-Date: 2011-02-23 09:25+0000\n"
 "Last-Translator: YAKIR RACHMANY <yakirra@gmail.com>, 2014\n"
 "Language-Team: Hebrew (http://www.transifex.com/spek/spek/language/he/)\n"
@@ -140,69 +140,69 @@ msgstr "-00 dB"
 msgid "Spek - Acoustic Spectrum Analyser"
 msgstr "Spek - Acoustic Spectrum Analyser"
 
-#: src/spek-window.cc:74
+#: src/spek-window.cc:73
 msgid "&File"
 msgstr "&קובץ"
 
-#: src/spek-window.cc:80
+#: src/spek-window.cc:79
 msgid "&Edit"
 msgstr "&עריכה"
 
-#: src/spek-window.cc:84 src/spek-window.cc:89
+#: src/spek-window.cc:83 src/spek-window.cc:88
 msgid "&Help"
 msgstr "&עזרה"
 
-#: src/spek-window.cc:111
+#: src/spek-window.cc:110
 msgid "Help"
 msgstr "עזרה"
 
-#: src/spek-window.cc:124
+#: src/spek-window.cc:123
 msgid "A new version of Spek is available, click to download."
 msgstr "גרסה חדשה זמינה, לחץ להורדה."
 
 #. TRANSLATORS: window title, %s is replaced with the file name
-#: src/spek-window.cc:162
+#: src/spek-window.cc:161
 #, c-format
 msgid "Spek - %s"
 msgstr "Spek - %s"
 
-#: src/spek-window.cc:210
+#: src/spek-window.cc:209
 msgid "All files"
 msgstr "כל הקבצים"
 
-#: src/spek-window.cc:212
+#: src/spek-window.cc:211
 msgid "Audio files"
 msgstr "קבצי שמע"
 
-#: src/spek-window.cc:226
+#: src/spek-window.cc:225
 msgid "Open File"
 msgstr "פתח קובץ"
 
-#: src/spek-window.cc:248
+#: src/spek-window.cc:247
 msgid "PNG images"
 msgstr "תמונות PNG"
 
-#: src/spek-window.cc:254
+#: src/spek-window.cc:253
 msgid "Save Spectrogram"
 msgstr "שמור ספקטרום"
 
 #. Suggested name is <file_name>.png
-#: src/spek-window.cc:262
+#: src/spek-window.cc:261
 msgid "Untitled"
 msgstr "ללא כותרת"
 
 #. TRANSLATORS: Add your name here
-#: src/spek-window.cc:316
+#: src/spek-window.cc:315
 msgid "translator-credits"
 msgstr "קרדיטים-למתרגמים"
 
-#: src/spek-window.cc:322
+#: src/spek-window.cc:321
 msgid "Copyright (c) 2010-2013 Alexander Kojevnikov and contributors"
 msgstr ""
 "כל הזכויות שמורות: (c) 2010-2013 \n"
 "אלכסנדר קוג'בניקוב והכותבים"
 
-#: src/spek-window.cc:325
+#: src/spek-window.cc:324
 msgid "Spek Website"
 msgstr "Spek אתר הבית"
 
