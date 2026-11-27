@@ -49,7 +49,10 @@ if [ "$BUILD" = 1 ]; then
     fi
     export ACLOCAL_PATH="$(dirname "$WXM4"):$(dirname "$GTM4"):$BREW_PREFIX/share/aclocal${ACLOCAL_PATH:+:$ACLOCAL_PATH}"
     rm -f src/spek
-    ./autogen.sh
+    # Spek translates through wxWidgets, not libintl, but configure only builds
+    # the po/*.gmo catalogs when it finds libintl, which Homebrew keeps off the
+    # default search path.
+    ./autogen.sh --with-libintl-prefix="$(brew --prefix gettext)"
     make -j"$(sysctl -n hw.ncpu)"
 fi
 
