@@ -55,3 +55,6 @@ tests/samples/perf.wav
 tests/test
 web/version
 xmldocs.make
+
+# Generated test corpus
+tests/corpus/out/
