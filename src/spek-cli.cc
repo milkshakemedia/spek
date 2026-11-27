@@ -59,7 +59,7 @@ const char *EXTENSIONS[] = {
 const int FFT_BITS = 10;   // 513 frequency rows
 const double LRANGE = -120.0;
 const double URANGE = 0.0;
-const int LPAD = 46, TPAD = 10, RPAD = 60, BPAD = 24;
+const int LPAD = 62, TPAD = 12, RPAD = 150, BPAD = 46;
 const int HEADER = 86;      // metadata and verdict band above the spectrogram
 
 #ifdef _WIN32
@@ -211,57 +211,10 @@ void collect(int bands, int sample, float *values, void *data)
     }
 }
 
-// A 3x5 pixel font for axis labels, drawn at twice the size.
-const char *glyph(char ch)
-{
-    switch (ch) {
-    case '0': return "111101101101111";
-    case '1': return "010110010010111";
-    case '2': return "111001111100111";
-    case '3': return "111001111001111";
-    case '4': return "101101111001001";
-    case '5': return "111100111001111";
-    case '6': return "111100111101111";
-    case '7': return "111001001001001";
-    case '8': return "111101111101111";
-    case '9': return "111101111001111";
-    case 'k': return "100101110101101";
-    case 's': return "011100010001110";
-    case ':': return "000010000010000";
-    case '.': return "000000000000010";
-    }
-    return nullptr;
-}
-
 void put(wxImage& img, int x, int y, uint32_t rgb)
 {
     if (x >= 0 && y >= 0 && x < img.GetWidth() && y < img.GetHeight()) {
         img.SetRGB(x, y, (rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
-    }
-}
-
-int text_width(const std::string& s)
-{
-    return (int)s.size() * 8 - 2;
-}
-
-void text(wxImage& img, int x, int y, const std::string& s, uint32_t rgb)
-{
-    for (char ch : s) {
-        const char *g = glyph(ch);
-        if (g) {
-            for (int r = 0; r < 5; ++r) {
-                for (int c = 0; c < 3; ++c) {
-                    if (g[r * 3 + c] == '1') {
-                        put(img, x + 2 * c, y + 2 * r, rgb);
-                        put(img, x + 2 * c + 1, y + 2 * r, rgb);
-                        put(img, x + 2 * c, y + 2 * r + 1, rgb);
-                        put(img, x + 2 * c + 1, y + 2 * r + 1, rgb);
-                    }
-                }
-            }
-        }
-        x += 8;
     }
 }
 
@@ -359,22 +312,30 @@ void fill(wxImage& img, int x0, int y0, int w, int h, uint32_t rgb)
     }
 }
 
-std::string time_label(double s)
+std::string time_label(double s, bool minutes)
 {
     char buf[32];
-    if (s < 60) {
-        snprintf(buf, sizeof(buf), "%gs", s);
-    } else {
+    if (minutes) {
         snprintf(buf, sizeof(buf), "%d:%02d", (int)s / 60, (int)s % 60);
+    } else {
+        snprintf(buf, sizeof(buf), "%g", s);
     }
     return buf;
 }
 
-std::string freq_label(double hz)
+// Text turned 90 degrees anticlockwise, reading bottom to top, its left edge
+// at x and its start at y.
+void ttext_up(wxImage& img, const SpekFont& f, int x, int y, const std::string& s, uint32_t rgb)
 {
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%gk", hz / 1000.0);
-    return buf;
+    for (unsigned int cp : utf8(s)) {
+        const SpekGlyph *g = find_glyph(f, cp);
+        if (!g) continue;
+        const unsigned char *al = f.alpha + g->offset;
+        for (int r = 0; r < f.height; ++r) {
+            for (int c = 0; c < g->width; ++c) blend(img, x + r, y - c, rgb, al[r * g->width + c]);
+        }
+        y -= g->advance;
+    }
 }
 
 std::string thousands(long long v)
@@ -525,8 +486,9 @@ bool spectrogram(const std::string& in, const std::string& out, int width, const
         }
     }
 
-    // Frequency axis.
+    // Frequency axis: ticks in kHz, title turned on its side.
     const uint32_t axis = 0xb0b0b0;
+    const SpekFont& small = spek_font_body;
     const double nyquist = a.sample_rate / 2.0;
     const double steps[] = { 1000, 2000, 5000, 10000, 20000, 50000 };
     double step = steps[0];
@@ -537,10 +499,15 @@ bool spectrogram(const std::string& in, const std::string& out, int width, const
     for (double f = 0; f <= nyquist; f += step) {
         int y = top + h - 1 - (int)lround(f / nyquist * (h - 1));
         for (int x = LPAD - 5; x < LPAD; ++x) put(img, x, y, axis);
-        std::string l = f == 0 ? "0" : freq_label(f);
-        text(img, LPAD - 7 - text_width(l), y - 5, l, axis);
+        char l[16];
+        snprintf(l, sizeof(l), "%g", f / 1000.0);
+        ttext(img, small, LPAD - 8 - ttext_width(small, l), y - small.height / 2, l, axis);
     }
-    // Time axis.
+    const std::string ftitle = "Frequency (kHz)";
+    ttext_up(img, small, 6, top + h / 2 + ttext_width(small, ftitle) / 2, ftitle, axis);
+
+    // Time axis: seconds for short files, minutes and seconds for long ones.
+    const bool minutes = a.duration >= 60;
     const double tsteps[] = { 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200 };
     double tstep = tsteps[0];
     for (double s : tsteps) {
@@ -550,8 +517,28 @@ bool spectrogram(const std::string& in, const std::string& out, int width, const
     for (double t = 0; a.duration > 0 && t <= a.duration; t += tstep) {
         int x = LPAD + (int)lround(t / a.duration * (width - 1));
         for (int y = top + h; y < top + h + 5; ++y) put(img, x, y, axis);
-        std::string l = time_label(t);
-        text(img, std::min(x - text_width(l) / 2, img.GetWidth() - text_width(l) - 1), top + h + 8, l, axis);
+        std::string l = time_label(t, minutes);
+        ttext(img, small, std::min(x - ttext_width(small, l) / 2, LPAD + width - ttext_width(small, l)), top + h + 6, l,
+              axis);
+    }
+    const std::string ttitle = minutes ? "Time (m:ss)" : "Time (seconds)";
+    ttext(img, small, LPAD + width / 2 - ttext_width(small, ttitle) / 2, top + h + 25, ttitle, axis);
+
+    // Colour scale: what each colour means in dB.
+    {
+        const int bx = LPAD + width + 86, bw = 12;
+        for (int y = 0; y < h; ++y) {
+            uint32_t col = spek_palette(PALETTE_SOX, 1.0 - (double)y / (h - 1));
+            for (int x = 0; x < bw; ++x) put(img, bx + x, top + y, col);
+        }
+        for (double db = URANGE; db >= LRANGE; db -= 20) {
+            int y = top + (int)lround((URANGE - db) / (URANGE - LRANGE) * (h - 1));
+            for (int x = bx + bw; x < bx + bw + 4; ++x) put(img, x, y, axis);
+            char l[16];
+            snprintf(l, sizeof(l), "%g", db);
+            ttext(img, small, bx + bw + 6, y - small.height / 2, l, axis);
+        }
+        ttext(img, small, bx - 2, top + h + 6, "dB", axis);
     }
 
     // The evidence: the cutoff the verdict rests on, dashed, across the
@@ -577,8 +564,8 @@ bool spectrogram(const std::string& in, const std::string& out, int width, const
             for (int dy = -(5 - i); dy <= 5 - i; ++dy) put(img, x + i, y + dy, rgb);
         }
         char buf[32];
-        snprintf(buf, sizeof(buf), "%.1fk", hz / 1000.0);
-        text(img, x + 9, y - 5, buf, rgb);
+        snprintf(buf, sizeof(buf), "%.1f kHz", hz / 1000.0);
+        ttext(img, spek_font_body_bold, x + 9, y - spek_font_body_bold.height / 2, buf, rgb);
     };
     const uint32_t whole = 0x00ffff, section = 0x80ff00;  // cyan, lime: off the palette
     const CutoffResult& cr = a.cutoff;
