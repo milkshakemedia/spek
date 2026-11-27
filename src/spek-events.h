@@ -24,7 +24,7 @@ private:
 
 typedef void (wxEvtHandler::*SpekHaveSampleEventFunction)(SpekHaveSampleEvent&);
 
-DECLARE_EVENT_TYPE(SPEK_HAVE_SAMPLE, wxID_ANY)
+DECLARE_LOCAL_EVENT_TYPE(SPEK_HAVE_SAMPLE, wxID_ANY)
 
 #define SPEK_EVT_HAVE_SAMPLE(fn) \
     DECLARE_EVENT_TABLE_ENTRY(SPEK_HAVE_SAMPLE, -1, -1, \

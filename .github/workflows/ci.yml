@@ -1,0 +1,90 @@
+# Linux jobs mirror builds verified locally; macOS and Windows jobs are new and unverified.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos-arm64:
+    # Primary platform. macos-15 runners are Apple Silicon.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies (Homebrew FFmpeg 9.x, wxWidgets 3.3.x)
+        run: |
+          brew update
+          brew install autoconf automake libtool gettext pkgconf ffmpeg wxwidgets
+          ffmpeg -version | head -1
+          wx-config --version
+      - name: Configure
+        run: |
+          # wxwin.m4 is not on aclocal's default path in Homebrew (see dist/osx/README.md).
+          WXM4=$(dirname "$(find "$(brew --prefix wxwidgets)/" -name wxwin.m4 | head -1)")
+          export ACLOCAL_PATH="$WXM4:$(brew --prefix)/share/aclocal"
+          ./autogen.sh --disable-valgrind
+      - run: make -j"$(sysctl -n hw.ncpu)"
+      - run: make check || { cat tests/test-suite.log; exit 1; }
+
+  linux:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ffmpeg: [distro, n7.1.5, n9.1]   # distro = Ubuntu 24.04's FFmpeg 6.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake libtool intltool gettext autopoint \
+            pkg-config libwxgtk3.2-dev valgrind nasm
+          if [ "${{ matrix.ffmpeg }}" = distro ]; then
+            sudo apt-get install -y libavformat-dev libavcodec-dev libavutil-dev
+          fi
+      - name: Cache FFmpeg build
+        if: matrix.ffmpeg != 'distro'
+        id: ffcache
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg
+          key: ffmpeg-${{ matrix.ffmpeg }}-ubuntu-24.04-v1
+      - name: Build FFmpeg from source (decoders/demuxers only)
+        if: matrix.ffmpeg != 'distro' && steps.ffcache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 -b ${{ matrix.ffmpeg }} https://github.com/FFmpeg/FFmpeg /tmp/ffsrc
+          cd /tmp/ffsrc
+          ./configure --prefix=$HOME/ffmpeg --enable-shared --disable-static \
+            --disable-programs --disable-doc --disable-avdevice --disable-avfilter \
+            --disable-swscale --disable-encoders --disable-muxers --disable-network
+          make -j"$(nproc)" && make install
+      - name: Point build at custom FFmpeg
+        if: matrix.ffmpeg != 'distro'
+        run: |
+          echo "PKG_CONFIG_PATH=$HOME/ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$HOME/ffmpeg/lib" >> "$GITHUB_ENV"
+      - run: ./autogen.sh
+      - run: make -j"$(nproc)"
+      - run: make check || { cat tests/test-suite.log; exit 1; }   # runs under valgrind
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            autoconf automake libtool make gettext-devel intltool
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-wxwidgets3.2-msw
+      - run: ./autogen.sh --disable-valgrind
+      - run: make -j"$(nproc)"
+      - run: make check || { cat tests/test-suite.log; exit 1; }
