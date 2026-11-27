@@ -52,5 +52,5 @@ Unix packages:
 
 ### Dependencies
 
- * wxWidgets >= 3
- * A recent version of FFmpeg
+ * wxWidgets >= 3.1.7
+ * FFmpeg >= 6.0 (libavformat, libavcodec, libavutil)

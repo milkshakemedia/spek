@@ -14,7 +14,8 @@ it somewhere on your disk and run `Spek\spek.exe`.
 Spek for Mac OS X is available in the download section. Download and open the
 DMG package, then drag the Spek icon to Applications.
 
-Spek requires OS X 10.5+ and an Intel-based Mac.
+To build the app bundle yourself on an Apple Silicon (or Intel) Mac with
+Homebrew, see [dist/osx/README.md](dist/osx/README.md).
 
 ## *BSD and GNU/Linux
 
@@ -38,9 +39,9 @@ terminal:
     ./configure
     make
 
-To build you will need wxWidgets and FFmpeg packages. On Debian/Ubuntu you also
-need development packages: `libwxgtk2.8-dev`, `wx-common`, `libavcodec-dev` and
-`libavformat-dev`.
+To build you will need wxWidgets 3.1.7 or later and FFmpeg 6.0 or later. On
+Debian/Ubuntu you also need development packages: `libwxgtk3.2-dev`,
+`libavcodec-dev`, `libavformat-dev` and `libavutil-dev`.
 
 To start Spek, run:
 

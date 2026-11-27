@@ -46,9 +46,12 @@ AM_COND_IF([USE_VALGRIND], [use_valgrind=yes], [use_valgrind=no])
 
 AC_CHECK_LIB(m, log10)
 
-PKG_CHECK_MODULES(AVFORMAT, [libavformat >= 59.27.100])
-PKG_CHECK_MODULES(AVCODEC, [libavcodec >= 59.37.100])
-PKG_CHECK_MODULES(AVUTIL, [libavutil >= 57.28.100])
+# FFmpeg 6.0 or later. The FFT uses av_tx's AV_TX_FLOAT_RDFT, whose forward
+# transform first zeroes the imaginary part of the Nyquist bin in 6.0 (in 5.1
+# that value is left uninitialised).
+PKG_CHECK_MODULES(AVFORMAT, [libavformat >= 60.3.100])
+PKG_CHECK_MODULES(AVCODEC, [libavcodec >= 60.3.100])
+PKG_CHECK_MODULES(AVUTIL, [libavutil >= 58.2.100])
 
 AM_OPTIONS_WXCONFIG
 reqwx=3.1.7

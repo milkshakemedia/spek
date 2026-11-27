@@ -13,9 +13,11 @@
 void spek_platform_init()
 {
 #ifdef OS_OSX
-    ProcessSerialNumber PSN;
-    GetCurrentProcess(&PSN);
-    TransformProcessType(&PSN, kProcessTransformToForegroundApplication);
+    // Make the process a regular foreground app even when launched as a bare
+    // binary outside Spek.app. kCurrentProcess replaces GetCurrentProcess(),
+    // which is deprecated since macOS 10.9.
+    ProcessSerialNumber psn = { 0, kCurrentProcess };
+    TransformProcessType(&psn, kProcessTransformToForegroundApplication);
 #endif
 }
 
