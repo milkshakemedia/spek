@@ -11,7 +11,10 @@ was made from, so they are simple and hard to fool:
   is reported too; some encoders keep the full band, which is exactly why a
   cutoff rule alone is not enough.
 * upsampled / lossy+upsampled: the spectrum falls at least 25 dB from just
-  below the true source's Nyquist frequency to 4-8 kHz above it.
+  below the true source's Nyquist frequency to 4-8 kHz above it. Where noise
+  was added up top to hide that fall, the file minus a plain upsample of the
+  same source must instead be noise at the labelled level, at least 60 dB
+  under the music below 22.05 kHz.
 * genuine hi-res: no such fall at 22.05 or 24 kHz, real content above 26 kHz
   (20 dB over the 24-bit noise floor), and more than 65536 distinct values.
 * padded-bits: samples sit exactly on a 16-bit grid (zero-padded), within a
@@ -144,6 +147,25 @@ def check(row, root, cache):
         note = "" if bw < 21000 else " (no low-pass: invisible to a cutoff rule)"
         return snr < LOSSLESS_SNR_DB, "SNR %.0f dB vs source, bandwidth %.1f kHz%s" % (
             snr, bw / 1000, note)
+
+    if verdict == "upsampled" and "noise at" in row.get("notes", ""):
+        # Noise added above the old Nyquist hides the fall, by design. Instead
+        # compare with the plain soxr upsample of the same CD source (same
+        # pipeline, same rate): the difference must be only noise at the stated
+        # level, with next to nothing below 22.05 kHz, so nothing up top came
+        # from the music.
+        plain = os.path.join(os.path.dirname(path), "44k-to-96k-soxr.flac")
+        x, y = decode(path), decode(plain)
+        k = min(len(x), len(y))
+        diff = (x[:k] - y[:k])[:, 0]
+        level = 10 * np.log10(np.mean(diff ** 2))
+        want = float(row["notes"].split("noise at ")[1].split(" dBFS")[0])
+        fd, dd = psd_db(diff[:, None].repeat(2, axis=1), rate)
+        fs, sd = psd_db(y[:k], rate)
+        below = band(fd, dd, 1000, true_rate / 2 * 0.9) - band(fs, sd, 1000, true_rate / 2 * 0.9)
+        ok = abs(level - want) < 3 and below < -60
+        return ok, "added noise %.0f dBFS RMS (labelled %.0f), %.0f dB under the music below 22.05 kHz" % (
+            level, want, below)
 
     if verdict in ("upsampled", "lossy+upsampled"):
         f = fall_db(freqs, db, true_rate / 2)
