@@ -14,7 +14,8 @@ it somewhere on your disk and run `Spek\spek.exe`.
 Spek for Mac OS X is available in the download section. Download and open the
 DMG package, then drag the Spek icon to Applications.
 
-Spek requires OS X 10.5+ and an Intel-based Mac.
+To build the app bundle yourself on an Apple Silicon (or Intel) Mac with
+Homebrew, see [dist/osx/README.md](dist/osx/README.md).
 
 ## *BSD and GNU/Linux
 
